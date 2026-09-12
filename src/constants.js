@@ -1,0 +1,121 @@
+'use strict';
+
+// ===== مستويات الصلاحيات =====
+const LEVELS = { STAFF: 1, SENIOR: 2, SUPERVISOR: 3, MANAGEMENT: 4, BOSS: 5 };
+
+// ===== الرتب (الترتيب من الأدنى للأعلى) =====
+const SUPPORT_RANKS = [
+  { name: 'Helper', category: 'تنفيذي', level: LEVELS.STAFF, handlesTickets: false },
+  { name: 'Support', category: 'تنفيذي', level: LEVELS.STAFF, handlesTickets: true },
+  { name: 'Support Expert', category: 'تنفيذي', level: LEVELS.SENIOR, handlesTickets: true },
+  { name: 'Support Analyst', category: 'تنفيذي', level: LEVELS.SENIOR, handlesTickets: true },
+  { name: 'Supervisor Manager', category: 'إشرافي', level: LEVELS.SUPERVISOR, handlesTickets: true },
+  { name: 'Support Office', category: 'إدارة عليا', level: LEVELS.MANAGEMENT, handlesTickets: true },
+  { name: 'Boss', category: 'مالك', level: LEVELS.BOSS, handlesTickets: true },
+];
+
+const MOD_RANKS = [
+  { name: 'Trial Moderator', category: 'تنفيذي', level: LEVELS.STAFF, perms: 'تايم أوت + حذف رسائل' },
+  { name: 'Moderator', category: 'تنفيذي', level: LEVELS.STAFF, perms: 'تحذير + تايم أوت + فويس + حذف + nickname' },
+  { name: 'Senior Moderator', category: 'تنفيذي', level: LEVELS.SENIOR, perms: 'كل ما سبق + كيك' },
+  { name: 'Admin', category: 'إشرافي', level: LEVELS.SUPERVISOR, perms: 'كل ما سبق + بان + إيموجي' },
+  { name: 'Head Of Moderators', category: 'إدارة عليا', level: LEVELS.MANAGEMENT, perms: 'كل ما سبق + إدارة الفريق' },
+];
+
+const TEAMS = { support: 'فريق الدعم الفني', moderation: 'فريق الإشراف' };
+
+// ===== حالات العضو =====
+const STATUS = {
+  active: 'نشط',
+  inactive: 'غير نشط',
+  on_leave: 'بإجازة',
+  probation: 'فترة تجريبية',
+  suspended: 'موقوف',
+  resigned: 'مستقيل',
+};
+
+// ===== تصنيفات FAQ =====
+const FAQ_CATEGORIES = [
+  { id: 1, name: 'قوانين الإدارة', desc: 'القوانين العامة لكلا الفريقين' },
+  { id: 2, name: 'قوانين فريق الإشراف', desc: 'قوانين خاصة بالمشرفين' },
+  { id: 3, name: 'آلية استلام التكتات', desc: 'خطوات استلام وحل التكتات' },
+  { id: 4, name: 'سياسة التصعيد', desc: 'متى وكيف تصعد المشكلة' },
+  { id: 5, name: 'أسلوب الرد والتعامل', desc: 'طريقة التعامل مع العملاء' },
+  { id: 6, name: 'العقوبات والإنذارات', desc: 'جدول العقوبات' },
+  { id: 7, name: 'سياسة الإجازات', desc: 'شروط وأنواع الإجازات' },
+  { id: 8, name: 'سياسة الاستقالة', desc: 'خطوات الاستقالة' },
+  { id: 9, name: 'نظام الترقيات', desc: 'شروط كل ترقية' },
+  { id: 10, name: 'صلاحيات كل رتبة', desc: 'جدول الصلاحيات' },
+  { id: 11, name: 'أسئلة شائعة', desc: 'أسئلة متكررة للإداريين' },
+];
+
+// ===== النشاط =====
+const ACTIVITY_WEIGHTS = { ticket: 0.5, staff: 0.25, moderation: 0.25, general: 0.1 };
+const ACTIVITY_TYPE_NAMES = { ticket: 'قنوات التكتات', staff: 'قنوات الإدارة', moderation: 'قنوات الإشراف', general: 'القنوات العامة' };
+const SPAM = { minLength: 8, duplicateWindowMs: 2 * 60 * 1000, maxGeneralPerDay: 20 };
+const ABSENCE = { dmHours: 72, staffAlertHours: 96, idleDays: 7 };
+
+// ===== الإجازات =====
+const LEAVE_TYPES = { normal: 'عادية', emergency: 'طارئة', sick: 'مرضية', study: 'دراسة', special: 'ظروف خاصة' };
+
+// ===== إجراءات الإشراف =====
+const MOD_ACTION_TYPES = { warn: 'تحذير', timeout: 'تايم أوت', kick: 'كيك', ban: 'بان', delete: 'حذف رسائل', voice: 'فويس', nickname: 'تغيير الاسم' };
+
+// ===== الملاحظات والإنذارات =====
+const NOTE_TYPES = {
+  positive: { label: 'ملاحظة إيجابية', emoji: '🟢', points: 5, minLevel: LEVELS.SUPERVISOR },
+  negative: { label: 'ملاحظة سلبية', emoji: '🟡', points: -10, minLevel: LEVELS.SUPERVISOR },
+};
+const WARNING_TYPES = {
+  verbal: { label: 'إنذار شفهي', emoji: '🟡', points: -10, freezeDays: 0, minLevel: LEVELS.SUPERVISOR },
+  first: { label: 'إنذار أول', emoji: '🟠', points: -20, freezeDays: 14, minLevel: LEVELS.MANAGEMENT },
+  second: { label: 'إنذار ثاني', emoji: '🔴', points: -20, freezeDays: 14, minLevel: LEVELS.MANAGEMENT },
+  final: { label: 'إنذار أخير', emoji: '🔴', points: -20, freezeDays: 60, suspend: true, minLevel: LEVELS.BOSS },
+};
+
+// ===== نقاط الترقية =====
+const POINTS = {
+  ticket_closed: { label: 'تكت مغلق', support: 2 },
+  ticket_rating_5: { label: 'تكت بتقييم 5', support: 5 },
+  ticket_rating_4: { label: 'تكت بتقييم 4', support: 2 },
+  ticket_rating_low: { label: 'تكت بتقييم 1-2', support: -3 },
+  ticket_reopened: { label: 'تكت معاد فتحه', support: -5 },
+  mod_action: { label: 'مخالفة معالجة', moderation: 3 },
+  fast_response: { label: 'استجابة سريعة', moderation: 5 },
+  wrong_decision: { label: 'قرار خاطئ', moderation: -15 },
+  week_above_80: { label: 'أسبوع Score فوق 80', all: 10 },
+  week_below_50: { label: 'أسبوع Score تحت 50', all: -10 },
+  helped_newbie: { label: 'مساعدة عضو جديد', all: 15 },
+  complex_case: { label: 'حل تكت/حالة معقدة', all: 10 },
+  positive_note: { label: 'ملاحظة إيجابية', all: 5 },
+  negative_note: { label: 'ملاحظة سلبية', all: -10 },
+  formal_warning: { label: 'إنذار رسمي', all: -20 },
+  verbal_warning: { label: 'إنذار شفهي', all: -10 },
+  best_of_month: { label: 'أفضل إداري بالشهر', all: 50 },
+  absence: { label: 'غياب بدون إجازة', all: -15 },
+  spam: { label: 'سبام', all: -10 },
+};
+
+// ===== شروط الترقية =====
+// approval: مستوى الصلاحية المطلوب للمراجع
+const SUPPORT_PROMOTIONS = [
+  { from: 'Helper', to: 'Support', months: 2, score: 65, points: 100, tickets: 0, rating: 3.5, maxWarnings: 0, approvers: 'مشرف', approvalLevel: LEVELS.SUPERVISOR },
+  { from: 'Support', to: 'Support Expert', months: 3, score: 70, points: 250, tickets: 20, rating: 4.0, maxWarnings: 1, approvers: 'مشرف + Office', approvalLevel: LEVELS.MANAGEMENT },
+  { from: 'Support Expert', to: 'Support Analyst', months: 4, score: 75, points: 500, tickets: 35, rating: 4.2, maxWarnings: 0, approvers: 'Office + Boss', approvalLevel: LEVELS.MANAGEMENT },
+  { from: 'Support Analyst', to: 'Supervisor Manager', months: 6, score: 80, points: 900, tickets: 50, rating: 4.5, maxWarnings: 0, approvers: 'Office + Boss', approvalLevel: LEVELS.MANAGEMENT },
+  { from: 'Supervisor Manager', to: 'Support Office', months: 8, score: 85, points: 1500, tickets: 50, rating: 4.7, maxWarnings: 0, approvers: 'Boss', approvalLevel: LEVELS.BOSS },
+];
+const MOD_PROMOTIONS = [
+  { from: 'Trial Moderator', to: 'Moderator', months: 1, score: 60, points: 80, actions: 15, maxWarnings: 0, approvers: 'Admin أو Head', approvalLevel: LEVELS.SUPERVISOR },
+  { from: 'Moderator', to: 'Senior Moderator', months: 3, score: 70, points: 200, actions: 30, maxWarnings: 1, approvers: 'Admin + Head', approvalLevel: LEVELS.MANAGEMENT },
+  { from: 'Senior Moderator', to: 'Admin', months: 4, score: 75, points: 450, actions: 50, maxWarnings: 0, approvers: 'Head', approvalLevel: LEVELS.MANAGEMENT },
+  { from: 'Admin', to: 'Head Of Moderators', months: 6, score: 85, points: 900, actions: 60, maxWarnings: 0, approvers: 'Head + إدارة السيرفر', approvalLevel: LEVELS.MANAGEMENT },
+];
+
+const COOLDOWNS = { promoted: 15, rejected: 30, warning: 14, suspended: 60 };
+
+module.exports = {
+  LEVELS, SUPPORT_RANKS, MOD_RANKS, TEAMS, STATUS, FAQ_CATEGORIES,
+  ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, MOD_ACTION_TYPES,
+  NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS,
+};
