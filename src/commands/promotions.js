@@ -1,0 +1,137 @@
+'use strict';
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { LEVELS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, POINTS, COOLDOWNS } = require('../constants');
+const promo = require('../services/promotions');
+const points = require('../services/points');
+const staffService = require('../services/staff');
+const { embed, COLORS, replyEphemeral, sendToChannel, dm, log } = require('../utils');
+
+function checksText(checks) {
+  return checks.map(c => `${c.pass ? '✅' : '❌'} **${c.label}**: ${c.actual} (المطلوب: ${c.required})`).join('\n');
+}
+
+function statusEmbed(staff, ev) {
+  if (!ev.rule) return embed('📈 حالة الترقية', `رتبتك الحالية: **${staff.rank}**\n${ev.reason}`, COLORS.gray);
+  const passed = ev.checks.filter(c => c.pass).length;
+  return embed(`📈 حالة الترقية: ${ev.rule.from} → ${ev.rule.to}`, `${checksText(ev.checks)}\n\n**${passed}/${ev.checks.length}** شرط مكتمل • ${ev.eligible ? '🟢 مؤهل لتقديم الطلب' : '🔴 غير مؤهل حالياً'}\n👥 الموافقة: ${ev.rule.approvers}`,
+    ev.eligible ? COLORS.success : COLORS.warning);
+}
+
+function requestEmbed(r, color) {
+  const checks = JSON.parse(r.snapshot || '[]');
+  const STATUS = { pending: '⏳ معلّق', approved: '✅ مقبول', rejected: '❌ مرفوض' };
+  return embed(`📈 طلب ترقية #${r.id}: ${r.from_rank} → ${r.to_rank}`, `👤 <@${r.user_id}>\n**الحالة:** ${STATUS[r.status]}\n\n${checksText(checks)}${r.note ? `\n\n**ملاحظة المتقدم:** ${r.note}` : ''}${r.reviewed_by ? `\n\n**المراجع:** <@${r.reviewed_by}>${r.review_reason ? ` — ${r.review_reason}` : ''}` : ''}`, color || COLORS.info);
+}
+
+const reviewRow = (id) => new ActionRowBuilder().addComponents(
+  new ButtonBuilder().setCustomId(`promo:approve:${id}`).setLabel('ترقية').setEmoji('✅').setStyle(ButtonStyle.Success),
+  new ButtonBuilder().setCustomId(`promo:reject:${id}`).setLabel('رفض').setEmoji('❌').setStyle(ButtonStyle.Danger));
+
+module.exports = {
+  commands: [
+    {
+      data: new SlashCommandBuilder().setName('promotion-info').setDescription('عرض نظام الترقيات وشروطه'),
+      level: LEVELS.STAFF,
+      async execute(i) {
+        const s = staffService.get(i.user.id);
+        const e1 = embed('🎧 ترقيات فريق الدعم الفني', SUPPORT_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎯 ${p.points} نقطة • 🎫 ${p.tickets}+ تكت • ⭐ ${p.rating}+ • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n') + '\n\n**Support Office → Boss**: يدوي بقرار Boss', COLORS.info);
+        const e2 = embed('🛡️ ترقيات فريق الإشراف', MOD_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎯 ${p.points} نقطة • 🛡️ ${p.actions}+ مخالفة • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n'), COLORS.info);
+        const team = s?.team;
+        const pos = Object.entries(POINTS).filter(([, d]) => (d.all ?? d[team || 'support'] ?? d.support ?? d.moderation) > 0).map(([, d]) => `• ${d.label}: **+${d.all ?? d[team] ?? d.support ?? d.moderation}**`).join('\n');
+        const neg = Object.entries(POINTS).filter(([, d]) => (d.all ?? d[team || 'support'] ?? d.support ?? d.moderation) < 0).map(([, d]) => `• ${d.label}: **${d.all ?? d[team] ?? d.support ?? d.moderation}**`).join('\n');
+        const e3 = embed('🎯 نقاط الترقية', `**إيجابية:**\n${pos}\n\n**خصومات:**\n${neg}\n\n**فترات التبريد:** بعد ترقية ${COOLDOWNS.promoted} يوم • بعد رفض ${COOLDOWNS.rejected} يوم • بعد إنذار ${COOLDOWNS.warning} يوم • بعد إيقاف ${COOLDOWNS.suspended} يوم\n\n> الترقية = مدة خدمة + أداء حقيقي + نقاط + موافقة الإدارة. لا توجد ترقية تلقائية.`, COLORS.primary);
+        return i.reply({ embeds: [e1, e2, e3], ephemeral: true });
+      },
+    },
+    {
+      data: new SlashCommandBuilder().setName('promotion-status').setDescription('عرض حالة ترقيتك وشروطها'),
+      level: LEVELS.STAFF,
+      async execute(i) {
+        const s = staffService.get(i.user.id);
+        if (!s) return replyEphemeral(i, '❌ غير مسجل كإداري.', COLORS.danger);
+        const ev = promo.evaluate(s);
+        const pending = promo.pendingRequest(i.user.id);
+        const e = statusEmbed(s, ev);
+        if (pending) e.addFields({ name: '📨 طلب معلّق', value: `#${pending.id} — بانتظار المراجعة` });
+        const hist = points.history(i.user.id, 8);
+        if (hist.length) e.addFields({ name: '🧾 آخر حركات النقاط', value: hist.map(h => `${h.points > 0 ? '🟢 +' : '🔴 '}${h.points} — ${h.reason}`).join('\n').slice(0, 1024) });
+        return i.reply({ embeds: [e], ephemeral: true });
+      },
+    },
+    {
+      data: new SlashCommandBuilder().setName('request-promotion').setDescription('تقديم طلب ترقية'),
+      level: LEVELS.STAFF, maxLevel: LEVELS.MANAGEMENT,
+      async execute(i) {
+        const s = staffService.get(i.user.id);
+        if (!s) return replyEphemeral(i, '❌ غير مسجل كإداري.', COLORS.danger);
+        if (promo.pendingRequest(i.user.id)) return replyEphemeral(i, '❌ لديك طلب ترقية معلّق بالفعل.', COLORS.danger);
+        const ev = promo.evaluate(s);
+        if (!ev.rule) return replyEphemeral(i, ev.reason, COLORS.gray);
+        if (!ev.eligible) return i.reply({ embeds: [statusEmbed(s, ev).setTitle('❌ غير مؤهل لتقديم طلب ترقية حالياً')], ephemeral: true });
+        const m = new ModalBuilder().setCustomId('promo:modal').setTitle(`📈 طلب ترقية إلى ${ev.rule.to}`);
+        m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note').setLabel('ملاحظة للإدارة — اختياري').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(false)));
+        return i.showModal(m);
+      },
+    },
+    {
+      data: new SlashCommandBuilder().setName('review-promotion').setDescription('مراجعة طلبات الترقية المعلّقة'),
+      level: LEVELS.MANAGEMENT,
+      async execute(i) {
+        const rows = promo.listPending();
+        if (!rows.length) return replyEphemeral(i, '✅ لا توجد طلبات ترقية معلّقة.', COLORS.success);
+        await i.reply({ embeds: [embed('⏳ طلبات الترقية المعلّقة', `العدد: **${rows.length}**`, COLORS.info)], ephemeral: true });
+        for (const r of rows.slice(0, 10)) await i.followUp({ embeds: [requestEmbed(r)], components: [reviewRow(r.id)], ephemeral: true });
+      },
+    },
+  ],
+
+  components: {
+    'promo:modal': async (i) => {
+      const s = staffService.get(i.user.id);
+      const ev = promo.evaluate(s);
+      if (!ev.eligible) return replyEphemeral(i, '❌ لم تعد مؤهلاً.', COLORS.danger);
+      const id = promo.createRequest(s, ev, (i.fields.getTextInputValue('note') || '').trim());
+      const r = promo.getRequest(id);
+      const msg = await sendToChannel(i.client, 'manager-review', { embeds: [requestEmbed(r)], components: [reviewRow(id)] });
+      if (msg) require('../database').getDb().prepare('UPDATE promotion_requests SET message_id = ? WHERE id = ?').run(msg.id, id);
+      return replyEphemeral(i, `✅ تم إرسال طلب الترقية **#${id}** للمراجعة.`, COLORS.success);
+    },
+    'promo:approve': async (i, [id]) => {
+      const r = promo.getRequest(Number(id));
+      if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
+      const s = staffService.get(r.user_id);
+      const rule = promo.nextPromotion(s);
+      if (!rule || rule.to !== r.to_rank) return replyEphemeral(i, '❌ رتبة العضو تغيرت منذ الطلب.', COLORS.danger);
+      if (i.staffLevel < rule.approvalLevel) return replyEphemeral(i, `❌ هذه الترقية تتطلب موافقة: ${rule.approvers}.`, COLORS.danger);
+      if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك ترقية نفسك.', COLORS.danger);
+
+      promo.review(r.id, 'approved', i.user.id, null);
+      staffService.setRank(r.user_id, s.team, rule.to);
+      points.resetForNewRank(r.user_id, `ترقية إلى ${rule.to}`);
+      const until = points.setCooldown(r.user_id, 'promoted');
+      const member = await i.guild.members.fetch(r.user_id).catch(() => null);
+      const rolesOk = member ? await staffService.applyRankRoles(member, s.team, rule.to) : false;
+
+      await i.update({ embeds: [requestEmbed(promo.getRequest(r.id), COLORS.success)], components: [] });
+      await dm(i.client, r.user_id, { embeds: [embed('🎉 مبروك الترقية!', `تمت ترقيتك إلى **${rule.to}**.\nفترة التبريد للترقية التالية حتى ${until}.`, COLORS.success)] });
+      await sendToChannel(i.client, 'staff-updates', { embeds: [embed('🎉 ترقية جديدة', `<@${r.user_id}> — **${rule.from} → ${rule.to}**\nبقرار <@${i.user.id}>`, COLORS.success)] });
+      return log(i.client, '📈 ترقية', `<@${r.user_id}>: ${rule.from} → ${rule.to} بواسطة <@${i.user.id}>${rolesOk ? '' : '\n⚠️ لم يتم تعديل الرتب تلقائياً — عدّلها يدوياً'}`, COLORS.success);
+    },
+    'promo:reject': async (i, [id]) => {
+      const m = new ModalBuilder().setCustomId(`promo:rejectmodal:${id}`).setTitle('❌ سبب رفض الترقية');
+      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('السبب').setStyle(TextInputStyle.Paragraph).setMaxLength(300).setRequired(true)));
+      return i.showModal(m);
+    },
+    'promo:rejectmodal': async (i, [id]) => {
+      const r = promo.getRequest(Number(id));
+      if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
+      const reason = i.fields.getTextInputValue('reason').trim();
+      promo.review(r.id, 'rejected', i.user.id, reason);
+      const until = points.setCooldown(r.user_id, 'rejected');
+      if (i.message) await i.message.edit({ embeds: [requestEmbed(promo.getRequest(r.id), COLORS.danger)], components: [] }).catch(() => {});
+      await replyEphemeral(i, `تم رفض الطلب #${r.id}. فترة تبريد حتى ${until}.`, COLORS.danger);
+      await dm(i.client, r.user_id, { embeds: [embed('❌ تم رفض طلب الترقية', `**السبب:** ${reason}\nيمكنك التقديم مجدداً بعد ${until}.`, COLORS.danger)] });
+      return log(i.client, '📈 رفض ترقية', `<@${r.user_id}> — #${r.id} بواسطة <@${i.user.id}>\n${reason}`, COLORS.danger);
+    },
+  },
+};
