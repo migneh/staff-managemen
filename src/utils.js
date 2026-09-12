@@ -1,6 +1,7 @@
 'use strict';
 const { EmbedBuilder } = require('discord.js');
 const config = require('./config');
+const settings = () => require('./services/settings');
 
 const COLORS = { primary: 0x5865f2, success: 0x57f287, warning: 0xfee75c, danger: 0xed4245, info: 0x3498db, gray: 0x99aab5 };
 
@@ -10,6 +11,19 @@ function embed(title, description, color = COLORS.primary) {
   if (description) e.setDescription(description);
   return e;
 }
+
+/** إمبد يحمل هوية المستخدم (صورة + اسم) — للتقارير والسجلات */
+function userEmbed(user, title, description, color = COLORS.primary) {
+  const e = embed(title, description, color);
+  if (user) e.setAuthor({ name: user.displayName || user.username || user.tag, iconURL: typeof user.displayAvatarURL === 'function' ? user.displayAvatarURL() : undefined }).setThumbnail(typeof user.displayAvatarURL === 'function' ? user.displayAvatarURL({ size: 128 }) : null);
+  return e;
+}
+
+const ok = (i, text) => replyEphemeral(i, `✅ ${text}`, COLORS.success);
+const fail = (i, text) => replyEphemeral(i, `❌ ${text}`, COLORS.danger);
+const divider = '━━━━━━━━━━━━━━━━━━━━';
+function scoreColor(score) { return score >= 85 ? 0x2ecc71 : score >= 70 ? 0x3498db : score >= 50 ? 0xf1c40f : 0xe74c3c; }
+function scoreEmoji(score) { return score >= 85 ? '🟢' : score >= 70 ? '🔵' : score >= 50 ? '🟡' : '🔴'; }
 
 function nowIso() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
 function today() { return new Date().toISOString().slice(0, 10); }
@@ -40,8 +54,8 @@ function discordTs(dateStr, style = 'D') {
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n - 1) + '…' : s || ''; }
 
 async function getChannel(client, key) {
-  const id = config.channels[key];
-  if (!id || id === 'CHANNEL_ID') return null;
+  const id = settings().channelId(key);
+  if (!id) return null;
   try { return await client.channels.fetch(id); } catch { return null; }
 }
 
@@ -70,8 +84,8 @@ async function replyEphemeral(interaction, content, color = COLORS.info) {
 }
 
 function progressBar(value, max, size = 10) {
-  const filled = Math.round(Math.min(value / max, 1) * size);
-  return '█'.repeat(filled) + '░'.repeat(size - filled);
+  const filled = Math.round(Math.min(Math.max(value, 0) / (max || 1), 1) * size);
+  return '▰'.repeat(filled) + '▱'.repeat(size - filled);
 }
 
-module.exports = { COLORS, embed, nowIso, today, addDays, isValidDate, daysBetween, monthsSince, hoursSince, discordTs, truncate, getChannel, sendToChannel, log, dm, replyEphemeral, progressBar };
+module.exports = { COLORS, embed, userEmbed, ok, fail, divider, scoreColor, scoreEmoji, nowIso, today, addDays, isValidDate, daysBetween, monthsSince, hoursSince, discordTs, truncate, getChannel, sendToChannel, log, dm, replyEphemeral, progressBar };

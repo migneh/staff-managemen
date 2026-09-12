@@ -1,5 +1,7 @@
 'use strict';
 const modules = [
+  require('./setup'),
+  require('./help'),
   require('./faq'),
   require('./logging'),
   require('./leaves'),

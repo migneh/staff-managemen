@@ -152,3 +152,26 @@ describe('راوتر المكونات', () => {
     assert.equal(resolveComponent('unknown:x'), null);
   });
 });
+
+describe('الإعدادات (/setup)', () => {
+  test('تُحفظ في قاعدة البيانات وتُقرأ فوراً وتُحسب الحالة', () => {
+    const settings = require('../src/services/settings');
+    const setup = require('../src/commands/setup');
+    let st = settings.status();
+    assert.equal(st.rolesDone, 0);
+    assert.equal(st.complete, false);
+    settings.setRole('support', 'Helper', '111');
+    settings.setChannel('staff-faq', '222');
+    settings.setActivity('ticket', ['333']);
+    assert.equal(settings.roleId('support', 'Helper'), '111');
+    assert.equal(settings.channelId('staff-faq'), '222');
+    assert.deepEqual(settings.activityChannels().ticket, ['333']);
+    st = settings.status();
+    assert.equal(st.rolesDone, 1);
+    assert.equal(st.channelsDone, 1);
+    assert.equal(st.missingChannels.length, 9);
+    // الصفحات تُبنى بدون أخطاء
+    const home = setup.homePage();
+    assert.equal(home.components.length, 2);
+  });
+});

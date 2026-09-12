@@ -13,11 +13,15 @@ const categoryChoices = FAQ_CATEGORIES.map(c => ({ name: `${c.id}. ${c.name}`, v
 function buildPanel() {
   const counts = faq.counts();
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const important = faq.list().filter(x => x.is_important).length;
   const e = embed('📚 قاعدة المعرفة — Staff FAQ',
-    'اختر تصنيفاً من القائمة أدناه لعرض القوانين والتعليمات الخاصة به.\n\n' +
-    FAQ_CATEGORIES.map(c => `**${c.id}.** ${c.name} — \`${counts[c.id] || 0}\``).join('\n') +
-    `\n\n📦 إجمالي المدخلات: **${total}**`, COLORS.primary)
-    .setFooter({ text: 'تتحدث اللوحة تلقائياً عند أي تعديل' });
+    '> كل ما تحتاج معرفته كإداري في مكان واحد.\n> اختر تصنيفاً من القائمة، أو ابحث، أو اضغط **غير المقروءة** لترى ما ينتظرك.\n\u200b', COLORS.primary)
+    .addFields(
+      { name: '📂 التصنيفات', value: FAQ_CATEGORIES.slice(0, 6).map(c => `\`${String(c.id).padStart(2, '0')}\` ${c.name} · **${counts[c.id] || 0}**`).join('\n'), inline: true },
+      { name: '\u200b', value: FAQ_CATEGORIES.slice(6).map(c => `\`${String(c.id).padStart(2, '0')}\` ${c.name} · **${counts[c.id] || 0}**`).join('\n'), inline: true },
+      { name: '\u200b', value: `📦 **${total}** مدخل • 📌 **${important}** يتطلب تأكيد قراءة` },
+    )
+    .setFooter({ text: 'تتحدث اللوحة تلقائياً عند أي إضافة أو تعديل' });
   const menu = new StringSelectMenuBuilder().setCustomId('faq:cat').setPlaceholder('📂 اختر التصنيف...')
     .addOptions(FAQ_CATEGORIES.map(c => ({ label: c.name, value: String(c.id), description: truncate(c.desc, 90), emoji: '📄' })));
   const buttons = new ActionRowBuilder().addComponents(

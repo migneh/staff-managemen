@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const { getDb } = require('../database');
-const config = require('../config');
+const settings = require('./settings');
 const { ACTIVITY_WEIGHTS, SPAM } = require('../constants');
 const { today } = require('../utils');
 
@@ -10,7 +10,7 @@ function classifyChannel(channel) {
   if (!channel) return 'general';
   const ids = [channel.id, channel.parentId, channel.parent?.parentId].filter(Boolean);
   for (const type of ['ticket', 'staff', 'moderation']) {
-    const list = config.activityChannels[type] || [];
+    const list = settings.activityChannels()[type] || [];
     if (ids.some(id => list.includes(id))) return type;
   }
   // احتياط: قنوات التكتات عادة تبدأ بـ ticket-

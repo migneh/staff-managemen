@@ -2,7 +2,7 @@
 const { getDb } = require('../database');
 const { resolveStaff } = require('./permissions');
 const { nowIso } = require('../utils');
-const config = require('../config');
+const settings = require('./settings');
 const { SUPPORT_RANKS, MOD_RANKS } = require('../constants');
 
 function get(userId) {
@@ -74,10 +74,10 @@ function setRank(userId, team, rank) {
 /** تعديل رتب الديسكورد فعلياً عند الترقية */
 async function applyRankRoles(member, team, newRank) {
   const ranks = team === 'support' ? SUPPORT_RANKS : MOD_RANKS;
-  const roleMap = config.roles[team] || {};
+  const roleMap = settings.roles()[team] || {};
   const newRoleId = roleMap[newRank];
-  if (!newRoleId || newRoleId === 'ROLE_ID') return false;
-  const toRemove = ranks.map(r => roleMap[r.name]).filter(id => id && id !== 'ROLE_ID' && id !== newRoleId && member.roles.cache.has(id));
+  if (!newRoleId) return false;
+  const toRemove = ranks.map(r => roleMap[r.name]).filter(id => id && id !== newRoleId && member.roles.cache.has(id));
   try {
     if (toRemove.length) await member.roles.remove(toRemove, 'ترقية عبر Staff Manager');
     await member.roles.add(newRoleId, 'ترقية عبر Staff Manager');
@@ -88,8 +88,8 @@ async function applyRankRoles(member, team, newRank) {
 /** إزالة كل الرتب الإدارية (عند الاستقالة) */
 async function removeAllStaffRoles(member) {
   const ids = [];
-  for (const team of ['support', 'moderation']) for (const id of Object.values(config.roles[team] || {})) {
-    if (id && id !== 'ROLE_ID' && member.roles.cache.has(id)) ids.push(id);
+  for (const team of ['support', 'moderation']) for (const id of Object.values(settings.roles()[team] || {})) {
+    if (id && member.roles.cache.has(id)) ids.push(id);
   }
   if (!ids.length) return true;
   try { await member.roles.remove(ids, 'استقالة مقبولة عبر Staff Manager'); return true; } catch { return false; }

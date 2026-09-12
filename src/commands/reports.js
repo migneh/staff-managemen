@@ -3,14 +3,13 @@ const { SlashCommandBuilder } = require('discord.js');
 const { LEVELS, TEAMS, STATUS, WARNING_TYPES } = require('../constants');
 const reports = require('../services/reports');
 const staffService = require('../services/staff');
-const { embed, COLORS, replyEphemeral, progressBar } = require('../utils');
+const { embed, COLORS, replyEphemeral, progressBar, scoreColor, scoreEmoji, divider } = require('../utils');
 
 function performanceEmbed(r) {
   const { staff, raw } = r;
-  const e = embed(`📊 تقرير الأداء — ${staff.username || staff.user_id}`, `👤 <@${staff.user_id}> • **${staff.rank}** • ${TEAMS[staff.team]} • ${STATUS[staff.status]}`,
-    r.score >= 70 ? COLORS.success : r.score >= 50 ? COLORS.warning : COLORS.danger);
+  const e = embed(`📊 تقرير الأداء — ${staff.username || staff.user_id}`, `👤 <@${staff.user_id}> • **${staff.rank}** • ${TEAMS[staff.team]} • ${STATUS[staff.status]}\n${divider}`, scoreColor(r.score));
   e.addFields(
-    { name: `📈 Score: ${r.score}/100 — ${r.grade}`, value: `${progressBar(r.score, 100, 20)}\n` + r.factors.map(f => `• ${f.name}: **${f.pts}/${f.max}** (${f.detail})`).join('\n') },
+    { name: `${scoreEmoji(r.score)} Score ${r.score}/100 — ${r.grade}`, value: `${progressBar(r.score, 100, 20)}\n` + r.factors.map(f => `${progressBar(f.pts, f.max, 5)} **${f.name}** ${f.pts}/${f.max} · ${f.detail}`).join('\n') },
     ...(staff.team === 'support'
       ? [{ name: '🎫 التكتات', value: `${raw.tickets}`, inline: true }, { name: '⏱️ متوسط الحل', value: raw.avgDuration != null ? `${raw.avgDuration} د` : '—', inline: true }, { name: '⭐ التقييم', value: raw.avgRating != null ? `${raw.avgRating}` : '—', inline: true }]
       : [{ name: '🛡️ المخالفات المعالجة', value: `${raw.actions}`, inline: true }]),
@@ -28,7 +27,7 @@ function performanceEmbed(r) {
 function leaderboardEmbed(rows, title) {
   if (!rows.length) return embed(title, 'لا يوجد إداريون مؤهلون للترتيب.', COLORS.gray);
   const medals = ['🥇', '🥈', '🥉'];
-  return embed(title, rows.slice(0, 20).map((r, idx) => `${medals[idx] || `**${idx + 1}.**`} <@${r.staff.user_id}> — **${r.score}** • ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`} • 🎯 ${r.points}`).join('\n'), COLORS.primary)
+  return embed(title, rows.slice(0, 20).map((r, idx) => `${medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`} • 🎯 ${r.points}`).join('\n'), COLORS.primary)
     .setFooter({ text: 'Boss والمجازون مستبعدون • آخر 30 يوم • للإدارة فقط' });
 }
 

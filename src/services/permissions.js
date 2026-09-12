@@ -1,5 +1,5 @@
 'use strict';
-const config = require('../config');
+const settings = require('./settings');
 const { LEVELS, SUPPORT_RANKS, MOD_RANKS } = require('../constants');
 
 /**
@@ -12,8 +12,8 @@ function resolveStaff(member) {
   const check = (team, ranks) => {
     for (let i = ranks.length - 1; i >= 0; i--) {
       const r = ranks[i];
-      const roleId = config.roles[team]?.[r.name];
-      if (roleId && roleId !== 'ROLE_ID' && member.roles.cache.has(roleId)) {
+      const roleId = settings.roleId(team, r.name);
+      if (roleId && member.roles.cache.has(roleId)) {
         const cand = { team, rank: r.name, level: r.level, handlesTickets: !!r.handlesTickets, index: i };
         if (!best || cand.level > best.level) best = cand;
         break;

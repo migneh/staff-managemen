@@ -18,32 +18,36 @@
 | 🎯 الترقيات | شروط كاملة (مدة + Score + نقاط + تكتات/مخالفات + تقييم + إنذارات + تبريد) — لا ترقية تلقائية |
 | 📊 التقارير | فردي، فريق، Leaderboard، تقارير يومية/أسبوعية/شهرية تلقائية مع مقارنة |
 
-## 🚀 التشغيل
+## 🚀 التشغيل (3 خطوات)
 
 ```bash
 npm install
-cp .env.example .env            # ضع التوكن و CLIENT_ID و GUILD_ID
-cp config.example.json config.json   # ضع معرفات الرتب والقنوات
-npm run deploy                  # تسجيل أوامر السلاش في السيرفر
-npm start
+cp .env.example .env     # ضع DISCORD_TOKEN و CLIENT_ID و GUILD_ID فقط
+npm run deploy && npm start
 ```
+
+ثم داخل السيرفر اكتب **`/setup`** (يتطلب Administrator) — معالج تفاعلي بقوائم اختيار:
+
+| الخطوة | كيف |
+|--------|-----|
+| 🎧🛡️ الرتب (12) | زر **مطابقة تلقائية بالاسم** 🪄 يربط الرتب التي تحمل نفس الاسم، والباقي تختاره من قائمة الرتب رتبةً رتبة (ينتقل تلقائياً للتالية) |
+| 📁 القنوات (10) | **إنشاء تلقائي** ✨ ينشئ كاتيجوري `📋 Staff Manager` بكل القنوات مع صلاحيات صحيحة (الحساسة للإدارة العليا فقط)، أو مطابقة بالاسم، أو اختيار من القائمة |
+| 📡 قنوات النشاط | اختر قنوات/كاتيجوري التكتات والإدارة والإشراف (اختياري) |
+
+**لا حاجة لنسخ أي معرف (ID).** الإعدادات تُحفظ في قاعدة البيانات وتظهر بشريط تقدم ✅. `config.json` ما زال مدعوماً كمصدر احتياطي اختياري.
 
 ### الصلاحيات المطلوبة للبوت في Discord Developer Portal
 - Intents: `Server Members`, `Message Content`
-- Permissions: إدارة الرتب (للترقيات والاستقالات)، إرسال الرسائل، تضمين الروابط
-- **يجب أن تكون رتبة البوت أعلى من كل الرتب الإدارية** ليتمكن من تعديلها
+- Permissions: إدارة الرتب، إدارة القنوات (للإنشاء التلقائي)، إرسال الرسائل، تضمين الروابط
+- **يجب أن تكون رتبة البوت أعلى من كل الرتب الإدارية** — المعالج ينبهك إن لم تكن كذلك
 
-## ⚙️ الإعداد (`config.json`)
-
-- `roles.support` / `roles.moderation`: معرف رتبة الديسكورد لكل رتبة إدارية (أعلى رتبة يملكها العضو هي المعتمدة)
-- `channels`: القنوات العشر المطلوبة (`staff-faq`, `staff-updates`, `leave-requests`, `resignation-requests`, `staff-logs`, `performance-reports`, `staff-alerts`, `ticket-logs`, `mod-logs`, `manager-review`)
-- `activityChannels`: معرفات القنوات أو الكاتيجوري لكل نوع (`ticket` 50% • `staff` 25% • `moderation` 25%) — الباقي يُعتبر عام 10%
-- أي قناة غير معرّفة تُعامل تلقائياً كتكت إذا كان اسمها يبدأ بـ `ticket-`
-
-## 📜 الأوامر (27)
+## 📜 الأوامر (30)
 
 | الأمر | الوصف | الصلاحية |
 |-------|-------|----------|
+| `/me` | 🏠 لوحتك الشخصية: الحالة، Score، الترقية، المهام المعلّقة | الكل |
+| `/help` | ❓ دليل تفاعلي بأقسام | الكل |
+| `/setup` | ⚙️ معالج الإعداد | Administrator |
 | `/faq` `/faq-list` | عرض قاعدة المعرفة | الكل |
 | `/faq-add` `/faq-edit` `/faq-delete` `/faq-panel` `/faq-refresh` | إدارة FAQ | إدارة عليا |
 | `/log-ticket` | تسجيل تكت | فريق الدعم |
@@ -84,10 +88,11 @@ src/
 ├── scheduler.js        # المهام المجدولة
 ├── utils.js
 ├── services/           # منطق الأعمال (قابل للاختبار بدون Discord)
+│   ├── settings.js     # الرتب والقنوات (من /setup) — مخزنة في DB
 │   ├── permissions.js  activity.js  staff.js  points.js
 │   ├── score.js  promotions.js  faq.js  reports.js
 └── commands/           # الأوامر + معالجات الأزرار/القوائم/النماذج
-    ├── faq.js  logging.js  leaves.js  resignations.js
+    ├── setup.js  help.js  faq.js  logging.js  leaves.js  resignations.js
     ├── records.js  promotions.js  reports.js  index.js
 tests/core.test.js      # npm test
 ```
