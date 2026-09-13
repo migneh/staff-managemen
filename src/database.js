@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   cancelled_by TEXT,
   cancelled_at TEXT,
   cancel_reason TEXT,
+  duration_days INTEGER,                -- مدة الطلب محسوبة
+  notice_hours INTEGER,                 -- كم ساعة قبل البداية قُدّم الطلب
+  attachment_url TEXT,                  -- رابط تقرير طبي/ إثبات (اختياري)
+  role_grant_at TEXT,                   -- التاريخ المخطط لتفعيل الرتبة فيه
+  extended_count INTEGER NOT NULL DEFAULT 0,
+  extends_from INTEGER,                 -- الطلب الذي مُدِّد منه
+  end_reason TEXT,                      -- auto | early | resignation | admin
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   reviewed_at TEXT
 );
@@ -106,6 +113,11 @@ CREATE TABLE IF NOT EXISTS resignations (
   withdrawn_at TEXT,
   withdraw_reason TEXT,
   roles_removed_at TEXT,
+  reason_category TEXT,                 -- مفتاح من RESIGNATION_REASONS للتحليلات
+  notice_days INTEGER,                 -- فترة الإشعار الفعلية
+  remove_roles_at TEXT,                -- تاريخ تنفيذ الإزالة (فارغ = فور القبول)
+  exit_interview TEXT,                 -- ملاحظة الإدارة بعد القرار
+  notified_reviewers TEXT NOT NULL DEFAULT '',  -- csv: تصعيد تم
   team TEXT,
   rank TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -170,6 +182,9 @@ CREATE TABLE IF NOT EXISTS faq_panels (
   channel_id TEXT NOT NULL,
   created_by TEXT NOT NULL,
   template_id INTEGER NOT NULL DEFAULT 0, -- 0 = اللوحة الافتراضية
+  label TEXT,                             -- اسم يميّز اللوحة (مثال: روم الدعم العام)
+  sync_status TEXT NOT NULL DEFAULT 'ok', -- ok | error
+  last_synced_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -179,6 +194,9 @@ CREATE TABLE IF NOT EXISTS faq_templates (
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   category_ids TEXT NOT NULL DEFAULT '[]', -- JSON: التصنيفات التي تظهر في هذا القالب
+  pinned_ids TEXT NOT NULL DEFAULT '[]',   -- JSON: مدخلات تظهر أولاً في هذا القالب فقط
+  excluded_ids TEXT NOT NULL DEFAULT '[]', -- JSON: مدخلات مخفية في هذا القالب فقط
+  note TEXT,                              -- ملاحظة خاصة باللوحة (تظهر لكل من في هذا الروم وحده)
   color INTEGER NOT NULL DEFAULT 5793266,
   created_by TEXT NOT NULL,
   updated_by TEXT,
@@ -302,11 +320,23 @@ function migrate(database) {
   };
   addTableColumns('leave_requests', [
     ['role_applied_at', 'TEXT'], ['role_removed_at', 'TEXT'], ['cancelled_by', 'TEXT'],
-    ['cancelled_at', 'TEXT'], ['cancel_reason', 'TEXT'],
+    ['cancelled_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['duration_days', 'INTEGER'],
+    ['notice_hours', 'INTEGER'], ['attachment_url', 'TEXT'], ['role_grant_at', 'TEXT'],
+    ['extended_count', 'INTEGER NOT NULL DEFAULT 0'], ['extends_from', 'INTEGER'],
+    ['end_reason', 'TEXT'],
   ]);
   addTableColumns('resignations', [
     ['reminders_sent', "TEXT NOT NULL DEFAULT ''"], ['withdrawn_by', 'TEXT'],
     ['withdrawn_at', 'TEXT'], ['withdraw_reason', 'TEXT'], ['roles_removed_at', 'TEXT'],
+    ['reason_category', 'TEXT'], ['notice_days', 'INTEGER'], ['remove_roles_at', 'TEXT'],
+    ['exit_interview', 'TEXT'], ['notified_reviewers', "TEXT NOT NULL DEFAULT ''"],
+  ]);
+  addTableColumns('faq_templates', [
+    ['pinned_ids', "TEXT NOT NULL DEFAULT '[]'"], ['excluded_ids', "TEXT NOT NULL DEFAULT '[]'"],
+    ['note', 'TEXT'],
+  ]);
+  addTableColumns('faq_panels', [
+    ['label', 'TEXT'], ['sync_status', "TEXT NOT NULL DEFAULT 'ok'"], ['last_synced_at', 'TEXT'],
   ]);
   database.exec('CREATE INDEX IF NOT EXISTS idx_faq_panels_template ON faq_panels(template_id)');
   database.exec('CREATE INDEX IF NOT EXISTS idx_leave_user_dates ON leave_requests(user_id, start_date, end_date)');

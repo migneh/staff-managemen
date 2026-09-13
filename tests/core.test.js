@@ -1,4 +1,5 @@
 'use strict';
+require('./sqlite-compat').install();
 process.env.DB_PATH = ':memory:';
 process.env.DOTENV_CONFIG_QUIET = 'true';
 const { test, describe, beforeEach } = require('node:test');
@@ -244,9 +245,9 @@ describe('الإعدادات (/setup)', () => {
     assert.equal(st.rolesDone, 1);
     assert.equal(st.channelsDone, 1);
     assert.equal(st.missingChannels.length, 9);
-    // الصفحات تُبنى بدون أخطاء
+    // الصفحات تُبنى بدون أخطاء (3 صفوف بعد إضافة سياسات الإجازة/الاستقالة)
     const home = setup.homePage();
-    assert.equal(home.components.length, 2);
+    assert.equal(home.components.length, 3);
   });
 });
 
