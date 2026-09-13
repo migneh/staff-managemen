@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS ticket_metrics (
   duration INTEGER,
   logged_by TEXT NOT NULL,
   reopened INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual', -- manual | external_log
+  source_message_id TEXT,
+  source_channel_id TEXT,
+  source_url TEXT,
+  ticket_url TEXT,
   closed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ticket_claimer ON ticket_metrics(claimer, closed_at);
@@ -197,7 +202,56 @@ CREATE TABLE IF NOT EXISTS saved_reports (
   data TEXT NOT NULL,            -- JSON
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  action TEXT NOT NULL,
+  actor_id TEXT,
+  target_id TEXT,
+  details TEXT,
+  channel_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_logs(target_id, created_at);
+
+CREATE TABLE IF NOT EXISTS staff_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  task_type TEXT NOT NULL DEFAULT 'general', -- general | onboarding | follow_up
+  due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | cancelled
+  assigned_by TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON staff_tasks(user_id, status);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
+
+function migrate(database) {
+  // ترقية قواعد البيانات القديمة بدون فقدان أي سجل.
+  const columns = new Set(database.prepare('PRAGMA table_info(ticket_metrics)').all().map(c => c.name));
+  const additions = [
+    ['source', "TEXT NOT NULL DEFAULT 'manual'"],
+    ['source_message_id', 'TEXT'],
+    ['source_channel_id', 'TEXT'],
+    ['source_url', 'TEXT'],
+    ['ticket_url', 'TEXT'],
+  ];
+  for (const [name, definition] of additions) {
+    if (!columns.has(name)) database.exec(`ALTER TABLE ticket_metrics ADD COLUMN ${name} ${definition}`);
+  }
+  database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_source_message ON ticket_metrics(source_message_id) WHERE source_message_id IS NOT NULL');
+}
 
 function getDb() {
   if (db) return db;
@@ -207,6 +261,7 @@ function getDb() {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 
@@ -214,6 +269,7 @@ function getDb() {
 function openMemoryDb() {
   db = new Database(':memory:');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

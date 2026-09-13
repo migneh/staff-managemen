@@ -7,8 +7,9 @@ const reports = require('../services/reports');
 const promo = require('../services/promotions');
 const faq = require('../services/faq');
 const points = require('../services/points');
+const taskService = require('../services/tasks');
 const { getDb } = require('../database');
-const { embed, userEmbed, COLORS, progressBar, scoreColor, scoreEmoji, hoursSince, divider } = require('../utils');
+const { embed, userEmbed, COLORS, progressBar, scoreColor, scoreEmoji, hoursSince, divider, replyEphemeral } = require('../utils');
 
 const SECTIONS = [
   { id: 'start', emoji: '🚀', label: 'ابدأ من هنا', desc: 'أهم 5 أوامر تحتاجها يومياً' },
@@ -26,7 +27,7 @@ function section(id, level, team) {
     case 'start': return embed('🚀 ابدأ من هنا', [
       'مرحباً بك! هذه أهم الأوامر:', '',
       cmd('me', 'لوحتك الشخصية: الحالة، Score، الترقية، المهام المعلّقة'),
-      team === 'support' ? cmd('log-ticket', 'سجّل كل تكت تغلقه (نقاط + تقييم)') : cmd('log-action', 'سجّل كل إجراء إشرافي — **الإجراء بدون تسجيل = مخالفة**'),
+      team === 'support' ? '🎫 سجل التكتات يُستورد تلقائياً من قناة بوت التكتات — استخدم /log-ticket فقط عند تعطل السجل الخارجي.' : team === 'moderation' ? cmd('log-action', 'سجّل كل إجراء إشرافي — **الإجراء بدون تسجيل = مخالفة**') : cmd('manage-general', 'إدارة التعيينات العامة (لـ General Manager فقط)'),
       cmd('faq', 'اقرأ القوانين — المدخلات 📌 تتطلب تأكيد قراءة'),
       cmd('request-leave', 'قبل أي غياب يتجاوز 72 ساعة'),
       cmd('promotion-status', 'شروط ترقيتك القادمة بـ ✅/❌'), '',
@@ -37,7 +38,9 @@ function section(id, level, team) {
       '**الإدارة العليا:**', cmd('faq-add', 'إضافة مدخل (نموذج)'), cmd('faq-edit', 'تعديل مدخل — يُطلب من الجميع إعادة قراءته'), cmd('faq-delete', 'حذف مع بقاء النسخة في التاريخ'), cmd('faq-panel', 'لوحة ثابتة في القناة تتحدث تلقائياً'), cmd('faq-refresh', 'تحديث اللوحات يدوياً'),
     ].join('\n'), COLORS.info);
     case 'work': return embed('🎫 تسجيل العمل', [
-      '**فريق الدعم الفني:**', cmd('log-ticket', 'نموذج: رقم التكت، صاحبه، المستلم، التقييم، المدة'),
+      '**فريق الدعم الفني:**',
+      '• سجل التكتات يُقرأ تلقائياً من قناة البوت الخارجي بعد ضبطها من `/setup` — لا حاجة لـ `/log-ticket`.',
+      '• عند تعطل البوت الخارجي فقط استخدم `/log-ticket` كخطة احتياطية.',
       '• تكت مغلق **+2** • تقييم 5 **+5** • تقييم 4 **+2** • تقييم 1-2 **-3** • معاد فتحه **-5**', '',
       '**فريق الإشراف:**', cmd('log-action', 'اختر النوع ثم املأ: العضو، السبب، المدة، الدليل'),
       '• كل إجراء **+3** • استجابة سريعة **+5** (يمنحها المشرف)', '',
@@ -60,8 +63,9 @@ function section(id, level, team) {
     case 'manage': return embed('🛠️ أدوات الإدارة', [
       '**المشرفون فأعلى:**', cmd('staff-report', 'تقرير أي إداري'), cmd('team-report', 'نظرة على الفريق كاملاً'), cmd('leaderboard', 'الترتيب (سري)'),
       cmd('add-note', 'ملاحظة 🟢 +5 / 🟡 -10 (يمكن جعلها سرية)'), cmd('warn', 'إنذار شفهي (المشرف) / رسمي (الإدارة) / أخير (Boss)'), cmd('staff-record', 'سجل أي إداري'),
-      cmd('rate-staff', 'التقييم اليدوي الذي يدخل في Score'), cmd('award-points', 'نقاط يدوية: مساعدة عضو جديد، حالة معقدة…'), '',
+      cmd('rate-staff', 'التقييم اليدوي الذي يدخل في Score'), cmd('award-points', 'نقاط يدوية: مساعدة عضو جديد، حالة معقدة…'), cmd('assign-task', 'تعيين مهام ومتابعات'), cmd('audit-log', 'سجل العمليات الحساسة'), '',
       '**الإدارة العليا:**', cmd('review-leaves', 'الإجازات المعلّقة'), cmd('review-promotion', 'الترقيات المعلّقة'), '• الاستقالات تُراجع من قناتها بالأزرار', '',
+      '**Server Manager / General Manager:**', cmd('manage-general', 'تعيين أو إزالة الإدارة العامة'), cmd('backup', 'نسخة احتياطية لقاعدة البيانات'), '',
       '**Administrator:**', cmd('setup', 'الرتب والقنوات بقوائم اختيار'),
     ].join('\n'), COLORS.danger);
   }
@@ -81,6 +85,7 @@ function dashboard(i) {
   const db = getDb();
   const pendingLeave = db.prepare(`SELECT id FROM leave_requests WHERE user_id = ? AND status = 'pending'`).get(i.user.id);
   const pendingPromo = promo.pendingRequest(i.user.id);
+  const pendingTasks = taskService.pendingCount(i.user.id);
   const cd = points.activeCooldown(i.user.id);
   const h = hoursSince(s.last_activity);
 
@@ -91,6 +96,7 @@ function dashboard(i) {
   if (pendingLeave) tasks.push(`🏖️ طلب إجازة #${pendingLeave.id} بانتظار المراجعة`);
   if (pendingPromo) tasks.push(`📈 طلب ترقية #${pendingPromo.id} بانتظار المراجعة`);
   if (ev.eligible && !pendingPromo) tasks.push(`🎉 **أنت مؤهل للترقية!** — \`/request-promotion\``);
+  if (pendingTasks) tasks.push(`📋 لديك **${pendingTasks}** مهمة معلّقة — \`/my-tasks\``);
   if (cd) tasks.push(`🧊 تجميد الترقية حتى ${cd.until}`);
 
   const e = userEmbed(i.member, `${statusIcon} لوحتك — ${s.rank}`, `${TEAMS[s.team]} • ${STATUS[s.status]} • بالرتبة منذ <t:${Math.floor(new Date(s.rank_since.replace(' ', 'T') + 'Z') / 1000)}:R>`, scoreColor(r.score));
@@ -121,17 +127,20 @@ module.exports = {
     {
       data: new SlashCommandBuilder().setName('help').setDescription('❓ دليل استخدام البوت'),
       level: LEVELS.STAFF,
-      async execute(i) { return i.reply({ ...helpPayload('start', i.staffLevel, i.staffInfo.team), ephemeral: true }); },
+      async execute(i) { return i.reply({ ...helpPayload('start', i.staffLevel, i.staffInfo?.team || 'general_management'), ephemeral: true }); },
     },
     {
       data: new SlashCommandBuilder().setName('me').setDescription('🏠 لوحتك الشخصية: الحالة، Score، الترقية، المهام'),
       level: LEVELS.STAFF,
-      async execute(i) { return i.reply({ ...dashboard(i), ephemeral: true }); },
+      async execute(i) {
+        if (!i.staffInfo) return replyEphemeral(i, 'ℹ️ لا توجد لك بطاقة إداري لأنك تستخدم صلاحية Server Manager فقط.', COLORS.info);
+        return i.reply({ ...dashboard(i), ephemeral: true });
+      },
     },
   ],
   components: {
     'help:section': async (i) => i.update(helpPayload(i.values[0], i.staffLevel, i.staffInfo.team)),
-    'help:open': async (i) => i.reply({ ...helpPayload('start', i.staffLevel, i.staffInfo.team), ephemeral: true }),
+    'help:open': async (i) => i.reply({ ...helpPayload('start', i.staffLevel, i.staffInfo?.team || 'general_management'), ephemeral: true }),
     'me:perf': async (i) => { const { commands } = require('./index'); return commands.get('my-performance').execute(i); },
     'me:record': async (i) => { const { commands } = require('./index'); return commands.get('my-record').execute(i); },
     'me:promo': async (i) => { const { commands } = require('./index'); return commands.get('promotion-status').execute(i); },

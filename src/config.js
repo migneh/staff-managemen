@@ -19,9 +19,12 @@ module.exports = {
   clientId: process.env.CLIENT_ID,
   guildId: process.env.GUILD_ID,
   dbPath: process.env.DB_PATH || path.join(__dirname, '..', 'data', 'staff.db'),
-  roles: fileConfig.roles || { support: {}, moderation: {} },
+  roles: fileConfig.roles || { support: {}, moderation: {}, general_management: {}, governance: {} },
   channels: fileConfig.channels || {},
   activityChannels: fileConfig.activityChannels || { ticket: [], staff: [], moderation: [] },
+  // اختياري: إذا تم تحديده فلن يقرأ البوت سجلات التكتات إلا من هذا البوت.
+  ticketLogBotId: /^\d+$/.test(process.env.TICKET_LOG_BOT_ID || fileConfig.ticketLogBotId || '') ? (process.env.TICKET_LOG_BOT_ID || fileConfig.ticketLogBotId) : null,
   leave: { maxDays: 30, maxConcurrent: 3, ...(fileConfig.leave || {}) },
   resignation: { noticeDays: 3, ...(fileConfig.resignation || {}) },
+  backup: { dir: process.env.BACKUP_DIR || fileConfig.backup?.dir || path.join(__dirname, '..', 'backups'), keep: Number(process.env.BACKUP_KEEP || fileConfig.backup?.keep || 14) },
 };

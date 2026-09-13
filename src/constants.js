@@ -1,7 +1,16 @@
 'use strict';
 
 // ===== مستويات الصلاحيات =====
-const LEVELS = { STAFF: 1, SENIOR: 2, SUPERVISOR: 3, MANAGEMENT: 4, BOSS: 5 };
+const LEVELS = {
+  STAFF: 1,
+  SENIOR: 2,
+  SUPERVISOR: 3,
+  MANAGEMENT: 4,
+  BOSS: 5,
+  // الإدارة العامة أعلى من مستويات الفريقين، لكنها لا تدخل في سلم الترقيات.
+  GENERAL_MANAGEMENT: 6,
+  GENERAL_MANAGER: 7,
+};
 
 // ===== الرتب (الترتيب من الأدنى للأعلى) =====
 const SUPPORT_RANKS = [
@@ -22,7 +31,18 @@ const MOD_RANKS = [
   { name: 'Head Of Moderators', category: 'إدارة عليا', level: LEVELS.MANAGEMENT, perms: 'كل ما سبق + إدارة الفريق' },
 ];
 
-const TEAMS = { support: 'فريق الدعم الفني', moderation: 'فريق الإشراف' };
+// الإدارة العامة فريق مستقل: لا توجد له ترقيات تلقائية أو شروط Score.
+// تعيين الرتبتين يتم فقط عبر Server Manager أو General Manager الحالي.
+const GENERAL_MANAGEMENT_RANKS = [
+  { name: 'Co General Manager', category: 'إدارة عامة', level: LEVELS.GENERAL_MANAGEMENT, handlesTickets: false, promotable: false },
+  { name: 'General Manager', category: 'إدارة عامة', level: LEVELS.GENERAL_MANAGER, handlesTickets: false, promotable: false },
+];
+
+const TEAMS = {
+  support: 'فريق الدعم الفني',
+  moderation: 'فريق الإشراف',
+  general_management: 'الإدارة العامة للسيرفر',
+};
 
 // ===== حالات العضو =====
 const STATUS = {
@@ -115,7 +135,7 @@ const MOD_PROMOTIONS = [
 const COOLDOWNS = { promoted: 15, rejected: 30, warning: 14, suspended: 60 };
 
 module.exports = {
-  LEVELS, SUPPORT_RANKS, MOD_RANKS, TEAMS, STATUS, FAQ_CATEGORIES,
+  LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, TEAMS, STATUS, FAQ_CATEGORIES,
   ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, MOD_ACTION_TYPES,
   NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS,
 };

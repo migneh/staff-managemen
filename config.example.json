@@ -16,6 +16,13 @@
       "Senior Moderator": "ROLE_ID",
       "Admin": "ROLE_ID",
       "Head Of Moderators": "ROLE_ID"
+    },
+    "general_management": {
+      "Co General Manager": "ROLE_ID",
+      "General Manager": "ROLE_ID"
+    },
+    "governance": {
+      "Server Manager": "ROLE_ID"
     }
   },
   "channels": {
@@ -28,8 +35,10 @@
     "staff-alerts": "CHANNEL_ID",
     "ticket-logs": "CHANNEL_ID",
     "mod-logs": "CHANNEL_ID",
-    "manager-review": "CHANNEL_ID"
+    "manager-review": "CHANNEL_ID",
+    "ticket-source-logs": "CHANNEL_ID"
   },
+  "ticketLogBotId": "OPTIONAL_BOT_ID",
   "activityChannels": {
     "_comment": "معرفات القنوات أو الكاتيجوري. أي قناة غير مذكورة تُعامل كقناة عامة",
     "ticket": ["CATEGORY_OR_CHANNEL_ID"],
@@ -42,5 +51,9 @@
   },
   "resignation": {
     "noticeDays": 3
+  },
+  "backup": {
+    "dir": "./backups",
+    "keep": 14
   }
 }

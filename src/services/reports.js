@@ -32,6 +32,7 @@ function team(teamKey, days = 30) {
 function leaderboard(teamKey, days = 30) {
   const members = staffService.all(teamKey ? { team: teamKey } : {});
   return members
+    .filter(m => ['support', 'moderation'].includes(m.team))
     .filter(m => !(m.team === 'support' && rankInfo('support', m.rank)?.level >= LEVELS.BOSS))
     .filter(m => !['on_leave', 'suspended', 'resigned'].includes(m.status))
     .map(m => {

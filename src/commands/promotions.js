@@ -4,6 +4,7 @@ const { LEVELS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, POINTS, COOLDOWNS } = requir
 const promo = require('../services/promotions');
 const points = require('../services/points');
 const staffService = require('../services/staff');
+const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, dm, log } = require('../utils');
 
 function checksText(checks) {
@@ -106,6 +107,7 @@ module.exports = {
       if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك ترقية نفسك.', COLORS.danger);
 
       promo.review(r.id, 'approved', i.user.id, null);
+      audit.record({ action: 'promotion_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, from: rule.from, to: rule.to }, channelId: i.channelId });
       staffService.setRank(r.user_id, s.team, rule.to);
       points.resetForNewRank(r.user_id, `ترقية إلى ${rule.to}`);
       const until = points.setCooldown(r.user_id, 'promoted');
@@ -126,6 +128,7 @@ module.exports = {
       const r = promo.getRequest(Number(id));
       if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
       const reason = i.fields.getTextInputValue('reason').trim();
+      audit.record({ action: 'promotion_rejected', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, reason }, channelId: i.channelId });
       promo.review(r.id, 'rejected', i.user.id, reason);
       const until = points.setCooldown(r.user_id, 'rejected');
       if (i.message) await i.message.edit({ embeds: [requestEmbed(promo.getRequest(r.id), COLORS.danger)], components: [] }).catch(() => {});

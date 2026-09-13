@@ -4,6 +4,7 @@ const { LEVELS, LEAVE_TYPES } = require('../constants');
 const config = require('../config');
 const { getDb } = require('../database');
 const staffService = require('../services/staff');
+const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, isValidDate, daysBetween, today, dm, log } = require('../utils');
 
 const STATUS_AR = { pending: '⏳ معلّق', approved: '✅ معتمد', rejected: '❌ مرفوض', ended: '🏁 منتهي' };
@@ -98,6 +99,7 @@ module.exports = {
       if (concurrentApproved(r.start_date, r.end_date) >= config.leave.maxConcurrent)
         return replyEphemeral(i, `❌ تم بلوغ الحد الأقصى (${config.leave.maxConcurrent}) للمجازين في هذه الفترة.`, COLORS.danger);
       db.prepare(`UPDATE leave_requests SET status = 'approved', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?`).run(i.user.id, r.id);
+      audit.record({ action: 'leave_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, start: r.start_date, end: r.end_date }, channelId: i.channelId });
       if (r.start_date <= today()) staffService.setStatus(r.user_id, 'on_leave');
       const updated = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(r.id);
       await i.update({ content: null, embeds: [leaveEmbed(updated, COLORS.success)], components: [] });
@@ -118,6 +120,7 @@ module.exports = {
       if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
       const reason = i.fields.getTextInputValue('reason').trim();
       db.prepare(`UPDATE leave_requests SET status = 'rejected', reviewed_by = ?, review_reason = ?, reviewed_at = datetime('now') WHERE id = ?`).run(i.user.id, reason, r.id);
+      audit.record({ action: 'leave_rejected', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, reason }, channelId: i.channelId });
       const updated = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(r.id);
       if (i.message) await i.message.edit({ content: null, embeds: [leaveEmbed(updated, COLORS.danger)], components: [] }).catch(() => {});
       await replyEphemeral(i, `تم رفض الطلب #${r.id}.`, COLORS.danger);

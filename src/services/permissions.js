@@ -1,6 +1,12 @@
 'use strict';
 const settings = require('./settings');
-const { LEVELS, SUPPORT_RANKS, MOD_RANKS } = require('../constants');
+const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS } = require('../constants');
+
+const TEAM_RANKS = {
+  support: SUPPORT_RANKS,
+  moderation: MOD_RANKS,
+  general_management: GENERAL_MANAGEMENT_RANKS,
+};
 
 /**
  * يحدد فريق ورتبة العضو من رتب الديسكورد (أعلى رتبة تفوز).
@@ -9,7 +15,7 @@ const { LEVELS, SUPPORT_RANKS, MOD_RANKS } = require('../constants');
 function resolveStaff(member) {
   if (!member?.roles?.cache) return null;
   let best = null;
-  const check = (team, ranks) => {
+  for (const [team, ranks] of Object.entries(TEAM_RANKS)) {
     for (let i = ranks.length - 1; i >= 0; i--) {
       const r = ranks[i];
       const roleId = settings.roleId(team, r.name);
@@ -19,10 +25,22 @@ function resolveStaff(member) {
         break;
       }
     }
-  };
-  check('support', SUPPORT_RANKS);
-  check('moderation', MOD_RANKS);
+  }
   return best;
+}
+
+/**
+ * Server Manager هو مالك السيرفر أو الرتبة التي يحددها /setup.
+ * General Manager الحالي يملك نفس صلاحية تعيين الإدارة العامة.
+ * لا نعتمد على اسم الرتبة حتى لا يتمكن أي عضو من انتحالها.
+ */
+function isServerManager(member) {
+  if (!member) return false;
+  if (member.id && member.guild?.ownerId && member.id === member.guild.ownerId) return true;
+  const configuredRole = settings.governanceRoleId();
+  if (configuredRole && member.roles?.cache?.has(configuredRole)) return true;
+  const info = resolveStaff(member);
+  return info?.team === 'general_management' && info.rank === 'General Manager';
 }
 
 function getLevel(member) {
@@ -30,16 +48,15 @@ function getLevel(member) {
 }
 
 function hasLevel(member, level) {
-  return getLevel(member) >= level;
+  return getLevel(member) >= level || isServerManager(member);
 }
 
-function isBoss(member) { return getLevel(member) >= LEVELS.BOSS; }
-function isManagement(member) { return getLevel(member) >= LEVELS.MANAGEMENT; }
-function isSupervisor(member) { return getLevel(member) >= LEVELS.SUPERVISOR; }
+function isBoss(member) { return getLevel(member) >= LEVELS.BOSS || isServerManager(member); }
+function isManagement(member) { return getLevel(member) >= LEVELS.MANAGEMENT || isServerManager(member); }
+function isSupervisor(member) { return getLevel(member) >= LEVELS.SUPERVISOR || isServerManager(member); }
 
 function rankInfo(team, rankName) {
-  const ranks = team === 'support' ? SUPPORT_RANKS : MOD_RANKS;
-  return ranks.find(r => r.name === rankName) || null;
+  return TEAM_RANKS[team]?.find(r => r.name === rankName) || null;
 }
 
 function levelName(level) {
@@ -51,7 +68,12 @@ const LEVEL_LABELS = {
   [LEVELS.SENIOR]: 'الرتب المتقدمة فأعلى',
   [LEVELS.SUPERVISOR]: 'المشرفين فأعلى',
   [LEVELS.MANAGEMENT]: 'الإدارة العليا',
-  [LEVELS.BOSS]: 'Boss فقط',
+  [LEVELS.BOSS]: 'Boss فأعلى',
+  [LEVELS.GENERAL_MANAGEMENT]: 'الإدارة العامة فأعلى',
+  [LEVELS.GENERAL_MANAGER]: 'General Manager / Server Manager',
 };
 
-module.exports = { resolveStaff, getLevel, hasLevel, isBoss, isManagement, isSupervisor, rankInfo, levelName, LEVEL_LABELS };
+module.exports = {
+  resolveStaff, getLevel, hasLevel, isBoss, isManagement, isSupervisor,
+  isServerManager, rankInfo, levelName, LEVEL_LABELS, TEAM_RANKS,
+};

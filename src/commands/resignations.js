@@ -4,6 +4,7 @@ const { LEVELS } = require('../constants');
 const config = require('../config');
 const { getDb } = require('../database');
 const staffService = require('../services/staff');
+const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, isValidDate, daysBetween, today, dm, log } = require('../utils');
 
 const STATUS_AR = { pending: '⏳ معلّق', accepted: '✅ مقبول', rejected: '❌ مرفوض', on_hold: '⏸️ معلّق لمقابلة' };
@@ -32,6 +33,7 @@ async function decide(i, id, status) {
   if (!r || !['pending', 'on_hold'].includes(r.status)) return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
   const reason = i.fields ? i.fields.getTextInputValue('reason').trim() : null;
   db.prepare(`UPDATE resignations SET status = ?, reviewed_by = ?, review_reason = ?, reviewed_at = datetime('now') WHERE id = ?`).run(status, i.user.id, reason, r.id);
+  audit.record({ action: `resignation_${status}`, actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, reason }, channelId: i.channelId });
   const updated = db.prepare('SELECT * FROM resignations WHERE id = ?').get(r.id);
 
   let color = COLORS.gray, dmEmbed;

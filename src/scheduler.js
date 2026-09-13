@@ -8,6 +8,7 @@ const score = require('./services/score');
 const { ABSENCE } = require('./constants');
 const { embed, COLORS, sendToChannel, dm, hoursSince, today, addDays } = require('./utils');
 const reportCmds = require('./commands/reports');
+const backup = require('./services/backup');
 
 const EXEMPT = ['on_leave', 'suspended', 'resigned'];
 
@@ -118,6 +119,7 @@ function start(client) {
   const tz = process.env.TZ || 'Asia/Riyadh';
   cron.schedule('*/30 * * * *', () => checkAbsence(client).catch(console.error), { timezone: tz });
   cron.schedule('5 0 * * *', () => processLeaves(client).catch(console.error), { timezone: tz });
+  cron.schedule('15 0 * * *', () => backup.createBackup({ reason: 'scheduled' }).catch(e => console.error('فشل النسخ الاحتياطي التلقائي:', e.message)), { timezone: tz });
   cron.schedule('0 9 * * *', () => dailyReport(client).catch(console.error), { timezone: tz });
   cron.schedule('0 10 * * 5', () => weeklyReport(client).catch(console.error), { timezone: tz });
   cron.schedule('0 11 1 * *', () => monthlyReport(client).catch(console.error), { timezone: tz });

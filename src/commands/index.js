@@ -9,6 +9,10 @@ const modules = [
   require('./records'),
   require('./promotions'),
   require('./reports'),
+  require('./tasks'),
+  require('./audit'),
+  require('./backup'),
+  require('./governance'),
 ];
 
 const commands = new Map();

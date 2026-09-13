@@ -45,6 +45,10 @@ function monthlyRaw(userId, days = 30) {
  * حساب الـ Score (0-100) مع تفصيل العوامل
  */
 function compute(staff, raw) {
+  // الإدارة العامة لا تدخل في Score أو شروط الترقيات؛ نعرض حالة محايدة بدلاً من احتساب تكتات/مخالفات.
+  if (staff.team === 'general_management') {
+    return { score: 100, factors: [{ name: 'نظام الإدارة العامة', pts: 100, max: 100, detail: 'خارج سلم Score والترقيات' }], raw: raw || monthlyRaw(staff.user_id) };
+  }
   raw = raw || monthlyRaw(staff.user_id);
   const factors = [];
   const push = (name, pts, max, detail) => factors.push({ name, pts, max, detail });

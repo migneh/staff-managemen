@@ -175,3 +175,40 @@ describe('الإعدادات (/setup)', () => {
     assert.equal(home.components.length, 2);
   });
 });
+
+describe('مهام التأهيل', () => {
+  test('تُنهي فترة التجربة بعد إكمال المهام الثلاث', () => {
+    const tasks = require('../src/services/tasks');
+    const db = getDb();
+    db.prepare("INSERT INTO staff_members (user_id, username, team, rank, status) VALUES ('new', 'new', 'support', 'Helper', 'probation')").run();
+    tasks.ensureOnboarding('new');
+    assert.equal(tasks.list('new').length, 3);
+    for (const task of tasks.list('new')) assert.ok(tasks.complete(task.id, 'new'));
+    assert.equal(db.prepare("SELECT status FROM staff_members WHERE user_id = 'new'").get().status, 'active');
+  });
+});
+
+describe('استيراد سجل التكتات الخارجي', () => {
+  test('يحلل رسالة البوت ويسجلها مرة واحدة فقط', () => {
+    const settings = require('../src/services/settings');
+    const ticketLogs = require('../src/services/ticketLogs');
+    settings.setChannel('ticket-source-logs', '999');
+    const message = {
+      id: '123456789012345678',
+      url: 'https://discord.com/channels/g/c/m',
+      author: { bot: true, id: '777', tag: 'Ticket Bot' },
+      channel: { id: '999' },
+      embeds: [{ title: 'سجل التكت رقم close-2127', description: 'صاحب التكت : <@1504915482904363099>\\nمستلم التذكرة : <@1005171993940852796>\\nالي قفل التكت : <@1442619466973980735>\\nرقم التكت : #close-2127\\nجميع الرسائل : [اضغط هنا](https://example.com/close-2127.html)' }],
+    };
+    const parsed = ticketLogs.parseExternalTicketMessage(message);
+    assert.equal(parsed.ticketId, 'close-2127');
+    assert.equal(parsed.claimer, '1005171993940852796');
+    assert.equal(parsed.closer, '1442619466973980735');
+    const first = ticketLogs.recordTicket(parsed);
+    assert.equal(first.duplicate, false);
+    assert.equal(first.earned, 2);
+    const second = ticketLogs.recordTicket(parsed);
+    assert.equal(second.duplicate, true);
+    assert.equal(getDb().prepare('SELECT COUNT(*) c FROM ticket_metrics').get().c, 1);
+  });
+});
