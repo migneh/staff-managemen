@@ -99,6 +99,42 @@ async function removeTeamRoles(member, team) {
   try { await member.roles.remove(ids, 'إزالة من الفريق عبر Staff Manager'); return true; } catch (e) { console.error('فشل إزالة رتب الفريق:', e.message); return false; }
 }
 
+function vacationRole(member) {
+  if (!member?.guild?.roles?.cache) return null;
+  const configured = settings.vacationRoleId();
+  if (configured) {
+    const role = member.guild.roles.cache.get(configured);
+    if (role) return role;
+  }
+  const normalize = value => String(value || '').toLowerCase().replace(/[\s_-]+/g, '');
+  return member.guild.roles.cache.find(role => ['invacation', 'فيإجازة', 'فيإجازه'].includes(normalize(role.name))) || null;
+}
+
+async function addVacationRole(member) {
+  const role = vacationRole(member);
+  if (!role) return { ok: false, missing: true };
+  if (member.roles.cache.has(role.id)) return { ok: true, already: true, role };
+  try {
+    await member.roles.add(role, 'بدء إجازة معتمدة عبر Staff Manager');
+    return { ok: true, role };
+  } catch (error) {
+    console.error('فشل إضافة رتبة الإجازة:', error.message);
+    return { ok: false, error, role };
+  }
+}
+
+async function removeVacationRole(member) {
+  const role = vacationRole(member);
+  if (!role || !member.roles.cache.has(role.id)) return { ok: true, absent: true, role };
+  try {
+    await member.roles.remove(role, 'انتهاء الإجازة عبر Staff Manager');
+    return { ok: true, role };
+  } catch (error) {
+    console.error('فشل إزالة رتبة الإجازة:', error.message);
+    return { ok: false, error, role };
+  }
+}
+
 /** إزالة كل الرتب الإدارية (عند الاستقالة أو إلغاء تعيين الإدارة العامة) */
 async function removeAllStaffRoles(member) {
   const ids = new Set();
@@ -112,4 +148,5 @@ async function removeAllStaffRoles(member) {
 module.exports = {
   get, all, ensure, setStatus, update, touchActivity, setRank,
   applyRankRoles, removeTeamRoles, removeAllStaffRoles,
+  vacationRole, addVacationRole, removeVacationRole,
 };

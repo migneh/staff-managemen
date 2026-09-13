@@ -53,7 +53,7 @@ function daily() {
   const actions = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE created_at >= datetime('now', '-1 day')`).get().c;
   const pending = {
     leaves: db.prepare(`SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'`).get().c,
-    resignations: db.prepare(`SELECT COUNT(*) c FROM resignations WHERE status = 'pending'`).get().c,
+    resignations: db.prepare(`SELECT COUNT(*) c FROM resignations WHERE status IN ('pending', 'on_hold')`).get().c,
     promotions: db.prepare(`SELECT COUNT(*) c FROM promotion_requests WHERE status = 'pending'`).get().c,
   };
   return { total: all.length, active, absent, onLeave, tickets, actions, pending };

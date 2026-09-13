@@ -23,6 +23,9 @@
     },
     "governance": {
       "Server Manager": "ROLE_ID"
+    },
+    "system": {
+      "in vacation": "ROLE_ID"
     }
   },
   "channels": {

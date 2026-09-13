@@ -75,14 +75,21 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   reason TEXT NOT NULL,
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | ended
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | ended | cancelled
   reviewed_by TEXT,
   review_reason TEXT,
   message_id TEXT,
-  reminders_sent TEXT NOT NULL DEFAULT '', -- csv: start,end,overdue
+  reminders_sent TEXT NOT NULL DEFAULT '', -- csv: start,end,overdue,role_added,role_removed
+  role_applied_at TEXT,
+  role_removed_at TEXT,
+  cancelled_by TEXT,
+  cancelled_at TEXT,
+  cancel_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   reviewed_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_leave_user_dates ON leave_requests(user_id, start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_leave_status_dates ON leave_requests(status, start_date, end_date);
 
 CREATE TABLE IF NOT EXISTS resignations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,15 +97,21 @@ CREATE TABLE IF NOT EXISTS resignations (
   reason TEXT NOT NULL,
   last_day TEXT NOT NULL,
   notes TEXT,
-  status TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | rejected | on_hold
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | rejected | on_hold | withdrawn
   reviewed_by TEXT,
   review_reason TEXT,
   message_id TEXT,
+  reminders_sent TEXT NOT NULL DEFAULT '', -- csv: three_day,one_day,overdue
+  withdrawn_by TEXT,
+  withdrawn_at TEXT,
+  withdraw_reason TEXT,
+  roles_removed_at TEXT,
   team TEXT,
   rank TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   reviewed_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_resignation_status_day ON resignations(status, last_day);
 
 CREATE TABLE IF NOT EXISTS warnings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -283,7 +296,22 @@ function migrate(database) {
 
   const panelColumns = new Set(database.prepare('PRAGMA table_info(faq_panels)').all().map(c => c.name));
   if (!panelColumns.has('template_id')) database.exec('ALTER TABLE faq_panels ADD COLUMN template_id INTEGER NOT NULL DEFAULT 0');
+  const addTableColumns = (table, additions) => {
+    const existing = new Set(database.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+    for (const [name, definition] of additions) if (!existing.has(name)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  };
+  addTableColumns('leave_requests', [
+    ['role_applied_at', 'TEXT'], ['role_removed_at', 'TEXT'], ['cancelled_by', 'TEXT'],
+    ['cancelled_at', 'TEXT'], ['cancel_reason', 'TEXT'],
+  ]);
+  addTableColumns('resignations', [
+    ['reminders_sent', "TEXT NOT NULL DEFAULT ''"], ['withdrawn_by', 'TEXT'],
+    ['withdrawn_at', 'TEXT'], ['withdraw_reason', 'TEXT'], ['roles_removed_at', 'TEXT'],
+  ]);
   database.exec('CREATE INDEX IF NOT EXISTS idx_faq_panels_template ON faq_panels(template_id)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_leave_user_dates ON leave_requests(user_id, start_date, end_date)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_leave_status_dates ON leave_requests(status, start_date, end_date)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_resignation_status_day ON resignations(status, last_day)');
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_source_message ON ticket_metrics(source_message_id) WHERE source_message_id IS NOT NULL');
 }
 

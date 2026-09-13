@@ -19,7 +19,7 @@ module.exports = {
   clientId: process.env.CLIENT_ID,
   guildId: process.env.GUILD_ID,
   dbPath: process.env.DB_PATH || path.join(__dirname, '..', 'data', 'staff.db'),
-  roles: fileConfig.roles || { support: {}, moderation: {}, general_management: {}, governance: {} },
+  roles: fileConfig.roles || { support: {}, moderation: {}, general_management: {}, governance: {}, system: {} },
   channels: fileConfig.channels || {},
   activityChannels: fileConfig.activityChannels || { ticket: [], staff: [], moderation: [] },
   // اختياري: إذا تم تحديده فلن يقرأ البوت سجلات التكتات إلا من هذا البوت.

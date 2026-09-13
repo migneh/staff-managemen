@@ -143,6 +143,63 @@ describe('قوالب FAQ', () => {
   });
 });
 
+describe('دورة الإجازات والاستقالات', () => {
+  test('يتحقق من التواريخ الميلادية بدقة', () => {
+    const { isValidDate } = require('../src/utils');
+    assert.equal(isValidDate('2026-02-28'), true);
+    assert.equal(isValidDate('2026-02-30'), false);
+    assert.equal(isValidDate('not-a-date'), false);
+  });
+
+  test('يمنع تداخل طلبات العضو ويحسب حد الإجازات المتزامنة', () => {
+    const leaves = require('../src/services/leaves');
+    const db = getDb();
+    db.prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u1', 'normal', 'r', '2026-09-15', '2026-09-20', 'pending')`).run();
+    assert.equal(leaves.userHasOverlap('u1', '2026-09-20', '2026-09-22').id, 1);
+    assert.equal(leaves.userHasOverlap('u2', '2026-09-20', '2026-09-22'), null);
+    db.prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u2', 'normal', 'r', '2026-09-16', '2026-09-18', 'approved')`).run();
+    db.prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u3', 'normal', 'r', '2026-09-17', '2026-09-19', 'approved')`).run();
+    assert.equal(leaves.concurrentApproved('2026-09-17', '2026-09-17'), 2);
+    assert.equal(leaves.approvedForUser('u2', { onOrAfter: '2026-09-17' }).length, 1);
+  });
+
+  test('يدعم سحب الاستقالة وتسجيل التذكيرات والحقول الجديدة', () => {
+    const db = getDb();
+    const result = db.prepare(`INSERT INTO resignations (user_id, reason, last_day, status) VALUES ('u1', 'r', '2026-09-30', 'pending')`).run();
+    db.prepare(`UPDATE resignations SET status = 'withdrawn', withdrawn_by = ?, withdrawn_at = datetime('now'), withdraw_reason = ? WHERE id = ?`).run('u1', 'تراجع', result.lastInsertRowid);
+    const row = db.prepare('SELECT * FROM resignations WHERE id = ?').get(result.lastInsertRowid);
+    assert.equal(row.status, 'withdrawn');
+    assert.equal(row.withdraw_reason, 'تراجع');
+    assert.equal(row.reminders_sent, '');
+  });
+
+  test('يحافظ على رتبة in vacation مع الإجازة القادمة ويزيلها بعد انتهائها', async () => {
+    const settings = require('../src/services/settings');
+    const leaves = require('../src/services/leaves');
+    const { today, addDays } = require('../src/utils');
+    const role = { id: 'vac-role', name: 'in vacation' };
+    const roleCache = new Map([[role.id, role]]);
+    const member = {
+      id: 'u1',
+      guild: { roles: { cache: roleCache } },
+      roles: {
+        cache: new Map(),
+        async add(r) { this.cache.set(r.id, r); },
+        async remove(r) { this.cache.delete(r.id); },
+      },
+    };
+    settings.setRole('system', 'in vacation', role.id);
+    const start = today();
+    const end = addDays(start, 1);
+    getDb().prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u1', 'normal', 'r', ?, ?, 'approved')`).run(start, end);
+    assert.equal((await leaves.syncVacationRole(member)).ok, true);
+    assert.equal(member.roles.cache.has(role.id), true);
+    getDb().prepare("UPDATE leave_requests SET status = 'ended' WHERE user_id = 'u1'").run();
+    assert.equal((await leaves.syncVacationRole(member)).ok, true);
+    assert.equal(member.roles.cache.has(role.id), false);
+  });
+});
+
 describe('التقارير والـ Leaderboard', () => {
   test('يستبعد Boss والمجازين', () => {
     seedStaff('b', 'support', 'Boss');
@@ -176,9 +233,11 @@ describe('الإعدادات (/setup)', () => {
     assert.equal(st.rolesDone, 0);
     assert.equal(st.complete, false);
     settings.setRole('support', 'Helper', '111');
+    settings.setRole('system', 'in vacation', 'vac-role');
     settings.setChannel('staff-faq', '222');
     settings.setActivity('ticket', ['333']);
     assert.equal(settings.roleId('support', 'Helper'), '111');
+    assert.equal(settings.vacationRoleId(), 'vac-role');
     assert.equal(settings.channelId('staff-faq'), '222');
     assert.deepEqual(settings.activityChannels().ticket, ['333']);
     st = settings.status();

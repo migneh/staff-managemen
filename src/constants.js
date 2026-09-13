@@ -38,6 +38,11 @@ const GENERAL_MANAGEMENT_RANKS = [
   { name: 'General Manager', category: 'إدارة عامة', level: LEVELS.GENERAL_MANAGER, handlesTickets: false, promotable: false },
 ];
 
+// رتب حالات تلقائية لا تُعتبر فريقاً ولا تمنح صلاحيات.
+const SYSTEM_ROLES = [
+  { name: 'in vacation', label: 'في إجازة', category: 'حالة تلقائية', level: 0 },
+];
+
 const TEAMS = {
   support: 'فريق الدعم الفني',
   moderation: 'فريق الإشراف',
@@ -135,7 +140,7 @@ const MOD_PROMOTIONS = [
 const COOLDOWNS = { promoted: 15, rejected: 30, warning: 14, suspended: 60 };
 
 module.exports = {
-  LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, TEAMS, STATUS, FAQ_CATEGORIES,
+  LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, STATUS, FAQ_CATEGORIES,
   ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, MOD_ACTION_TYPES,
   NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS,
 };

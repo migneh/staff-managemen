@@ -25,6 +25,7 @@ function load() {
       moderation: { ...(fileRoles.moderation || {}) },
       general_management: { ...(fileRoles.general_management || {}) },
       governance: { ...(fileRoles.governance || {}) },
+      system: { ...(fileRoles.system || {}) },
     },
     channels: { ...(fileConfig.channels || {}) },
     activityChannels: { ticket: [], staff: [], moderation: [], ...(fileConfig.activityChannels || {}) },
@@ -68,6 +69,7 @@ function roleId(team, rank) { return load().roles[team]?.[rank] || null; }
 function channelId(name) { return load().channels[name] || null; }
 function ticketLogBotId() { return load().ticketLogBotId || null; }
 function governanceRoleId() { return roleId('governance', 'Server Manager'); }
+function vacationRoleId() { return roleId('system', 'in vacation'); }
 
 /** حالة الإعداد: ما الذي ينقص */
 function status() {
@@ -88,6 +90,7 @@ function status() {
     ticketSourceConfigured: !!s.channels['ticket-source-logs'],
     ticketLogBotId: s.ticketLogBotId,
     governanceConfigured: !!governanceRoleId(),
+    vacationRoleConfigured: !!vacationRoleId(),
     complete: missingRoles.length === 0 && missingChannels.length === 0,
     anyRole: rolesDone > 0,
   };
@@ -98,6 +101,6 @@ const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs'];
 
 module.exports = {
   load, set, setRole, setGovernanceRole, setChannel, setActivity, setTicketLogBotId,
-  roles, channels, activityChannels, roleId, channelId, ticketLogBotId, governanceRoleId, status,
+  roles, channels, activityChannels, roleId, channelId, ticketLogBotId, governanceRoleId, vacationRoleId, status,
   CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS,
 };
