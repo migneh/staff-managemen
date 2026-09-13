@@ -1,9 +1,9 @@
 'use strict';
 const {
   SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
-  ChannelType, PermissionFlagsBits, StringSelectMenuBuilder,
+  ChannelType, PermissionFlagsBits, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
-const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS } = require('../constants');
+const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, LEAVE_TYPES, LEAVE_RULES, VACATION_ROLE_TIMING } = require('../constants');
 const settings = require('../services/settings');
 const { embed, COLORS, replyEphemeral, progressBar } = require('../utils');
 
@@ -34,14 +34,18 @@ function homePage() {
   const chanLine = settings.CHANNEL_KEYS.map(k => `${s.channels[k] ? '🟢' : '⚪'} ${CHANNEL_META[k].emoji} ${CHANNEL_META[k].label}${s.channels[k] ? ` → <#${s.channels[k]}>` : ''}`).join('\n');
   const actLine = Object.entries(ACTIVITY_META).map(([k, m]) => `${m.emoji} ${m.label} (${m.weight}): ${s.activityChannels[k]?.length ? s.activityChannels[k].map(id => `<#${id}>`).join(' ') : '_غير محدد_'}`).join('\n');
 
+  const lp = st.leavePolicy;
+  const rp = st.resignationPolicy;
+  const vacTiming = lp.vacationRoleTiming === 'at_approval' ? 'فور الموافقة' : 'عند بداية الإجازة';
   const e = embed('⚙️ إعداد Staff Manager', st.complete
     ? '✅ **الإعداد مكتمل!** البوت جاهز للعمل. يمكنك تعديل أي شيء من الأزرار أدناه.'
     : `أكمل الخطوات التالية لتشغيل البوت. كل خطوة قائمة اختيار — **بدون نسخ معرفات**.`, st.complete ? COLORS.success : COLORS.primary)
     .addFields(
-      { name: `1️⃣ الرتب — ${st.rolesDone}/${st.rolesTotal}  ${progressBar(st.rolesDone, st.rolesTotal, 12)}`, value: `**🎧 الدعم الفني**\n${roleLine('support', SUPPORT_RANKS)}\n\n**🛡️ الإشراف**\n${roleLine('moderation', MOD_RANKS)}\n\n**🏛️ الإدارة العامة**\n${roleLine('general_management', GENERAL_MANAGEMENT_RANKS)}\n\n**🏖️ الرتب التلقائية**\n${roleLine('system', SYSTEM_ROLES)}\n${st.vacationRoleConfigured ? '✅ رتبة **in vacation** مرتبطة' : '⚠️ رتبة **in vacation** غير مرتبطة'}` },
+      { name: `1️⃣ الرتب — ${st.rolesDone}/${st.rolesTotal}  ${progressBar(st.rolesDone, st.rolesTotal, 12)}`, value: `**🎧 الدعم الفني**\n${roleLine('support', SUPPORT_RANKS)}\n\n**🛡️ الإشراف**\n${roleLine('moderation', MOD_RANKS)}\n\n**🏛️ الإدارة العامة**\n${roleLine('general_management', GENERAL_MANAGEMENT_RANKS)}\n\n**🏖️ الرتب التلقائية**\n${roleLine('system', SYSTEM_ROLES)}\n${st.vacationRoleConfigured ? `✅ رتبة **in vacation** مرتبطة — تفعيل **${vacTiming}**` : '⚠️ رتبة **in vacation** غير مرتبطة — حددها ليُفعّل البوت الإجازات تلقائياً'}` },
       { name: `2️⃣ القنوات — ${st.channelsDone}/${st.channelsTotal}  ${progressBar(st.channelsDone, st.channelsTotal, 12)}`, value: chanLine },
       { name: '3️⃣ قنوات النشاط والتكتات الخارجية', value: actLine + `\n🤖 مصدر سجل التكتات: ${s.channels['ticket-source-logs'] ? `<#${s.channels['ticket-source-logs']}>` : '_غير محدد_'}\n_القنوات غير المحددة تُعتبر عامة (10%)، وقنوات \`ticket-…\` تُكتشف تلقائياً._` },
       { name: '4️⃣ صلاحية Server Manager', value: st.governanceConfigured ? `<@&${settings.governanceRoleId()}>` : '_اختيارية — إذا لم تحددها فمالك السيرفر فقط يستطيع تعيين الإدارة العامة_' },
+      { name: '5️⃣ سياسات الإجازات والاستقالة', value: `🏖️ الإجازات: **${lp.maxConcurrent}** مجازين كحد أقصى • **${lp.maxDays}** يوم كحد عام • السقف **${lp.maxDaysPer90}**/90 يوم • المعلقة تسقط بعد **${lp.pendingExpireDays}** يوم\n📤 الاستقالة: إشعار **${rp.noticeDays}** يوم • تصعيد بعد **${rp.pendingEscalateDays}** يوم` },
     )
     .setFooter({ text: 'الإعدادات تُحفظ فوراً في قاعدة البيانات' });
 
@@ -58,7 +62,11 @@ function homePage() {
     new ButtonBuilder().setCustomId('setup:ticket-source').setLabel('مصدر سجل التكتات').setEmoji('🤖').setStyle(st.ticketSourceConfigured ? ButtonStyle.Success : ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('setup:governance').setLabel('Server Manager').setEmoji('👑').setStyle(st.governanceConfigured ? ButtonStyle.Success : ButtonStyle.Secondary),
   );
-  return { embeds: [e], components: [row1, row2] };
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:policies').setLabel('سياسات الإجازات والاستقالة').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('setup:vacation-timing').setLabel(`تفعيل in vacation: ${vacTiming}`).setEmoji('⏰').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [e], components: [row1, row2, row3] };
 }
 
 // ===== صفحة الرتب: رتبة واحدة في كل خطوة مع قائمة اختيار الرتب =====
@@ -123,6 +131,35 @@ function ticketSourcePage() {
   );
   const nav = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary));
   return { embeds: [e], components: [select, nav] };
+}
+
+// ===== سياسات الإجازات والاستقالة =====
+function policiesPage() {
+  const st = settings.status();
+  const lp = st.leavePolicy;
+  const rp = st.resignationPolicy;
+  const rules = Object.entries(LEAVE_TYPES).map(([key, label]) => {
+    const r = settings.leavePolicy(key);
+    return `${r.emoji || '🏖️'} **${label}** — حتى ${r.maxDays} يوم • إشعار ${r.minNoticeHours}س • سقف ${r.maxDaysPer90}/90 يوم`;
+  }).join('\n');
+  const e = embed('📋 سياسات الإجازات والاستقالة', [
+    `**الإجازات — عام:** ${lp.maxConcurrent} مجازين كحد أقصى • ${lp.maxDays} يوم حد الإجازة الواحدة • المعلقة تسقط بعد ${lp.pendingExpireDays} يوم`,
+    `**الاستقالة:** إشعار ${rp.noticeDays} يوم • تصعيد بعد ${rp.pendingEscalateDays} يوم`,
+    '',
+    '**قواعد كل نوع إجازة:**',
+    rules,
+    '',
+    '_عدّلها من الأزرار — القيم تُطبق فوراً على الطلبات الجديدة._',
+  ].join('\n'), COLORS.info);
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:policies-edit-leave').setLabel('تعديل حدود الإجازات').setEmoji('🏖️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('setup:policies-edit-resign').setLabel('تعديل الاستقالة').setEmoji('📤').setStyle(ButtonStyle.Secondary),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:policies-reset').setLabel('استعادة الافتراضي').setEmoji('↩️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [e], components: [row1, row2] };
 }
 
 // ===== إعداد رتبة Server Manager =====
@@ -197,6 +234,57 @@ module.exports = {
     'setup:activity': async (i) => i.update(activityPage()),
     'setup:ticket-source': async (i) => i.update(ticketSourcePage()),
     'setup:governance': async (i) => i.update(governancePage()),
+    'setup:policies': async (i) => i.update(policiesPage()),
+    'setup:vacation-timing': async (i) => {
+      const cur = settings.leavePolicy().vacationRoleTiming || 'at_start';
+      const next = cur === 'at_start' ? 'at_approval' : 'at_start';
+      settings.setPolicy('vacationRoleTiming', next);
+      return i.update(homePage());
+    },
+    'setup:policies-edit-leave': async (i) => {
+      const lp = settings.leavePolicy();
+      const m = new ModalBuilder().setCustomId('setup:policies-leave-modal').setTitle('🏖️ تعديل سياسات الإجازات');
+      m.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxConcurrent').setLabel('الحد الأقصى للمجازين معاً').setStyle(TextInputStyle.Short).setMaxLength(2).setRequired(true).setValue(String(lp.maxConcurrent))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxDays').setLabel('أطول إجازة (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(lp.maxDays))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxDaysPer90').setLabel('السقف المتحرك / 90 يوم').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(lp.maxDaysPer90))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pendingExpireDays').setLabel('سقوط المعلقة بعد (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(lp.pendingExpireDays))),
+      );
+      return i.showModal(m);
+    },
+    'setup:policies-leave-modal': async (i) => {
+      const vals = {
+        maxConcurrent: Number(i.fields.getTextInputValue('maxConcurrent')),
+        maxDays: Number(i.fields.getTextInputValue('maxDays')),
+        maxDaysPer90: Number(i.fields.getTextInputValue('maxDaysPer90')),
+        pendingExpireDays: Number(i.fields.getTextInputValue('pendingExpireDays')),
+      };
+      if (Object.values(vals).some(v => !Number.isInteger(v) || v < 1 || v > 365)) return replyEphemeral(i, '❌ القيم يجب أن تكون أرقاماً صحيحة بين 1 و 365.', COLORS.danger);
+      for (const [k, v] of Object.entries(vals)) settings.setPolicy(k === 'maxConcurrent' ? 'leaveMaxConcurrent' : k === 'maxDays' ? 'leaveMaxDays' : k === 'maxDaysPer90' ? 'leaveMaxDaysPer90' : 'leavePendingExpireDays', v);
+      await i.reply({ embeds: [embed('✅ تم الحفظ', 'تم تحديث سياسات الإجازات.', COLORS.success)], ephemeral: true });
+      return i.message?.edit ? null : null;
+    },
+    'setup:policies-edit-resign': async (i) => {
+      const rp = settings.resignationPolicy();
+      const m = new ModalBuilder().setCustomId('setup:policies-resign-modal').setTitle('📤 تعديل سياسات الاستقالة');
+      m.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('noticeDays').setLabel('فترة الإشعار (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(rp.noticeDays))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('escalateDays').setLabel('تصعيد المعلقة بعد (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(rp.pendingEscalateDays))),
+      );
+      return i.showModal(m);
+    },
+    'setup:policies-resign-modal': async (i) => {
+      const noticeDays = Number(i.fields.getTextInputValue('noticeDays'));
+      const escalateDays = Number(i.fields.getTextInputValue('escalateDays'));
+      if (!Number.isInteger(noticeDays) || noticeDays < 1 || noticeDays > 30 || !Number.isInteger(escalateDays) || escalateDays < 1 || escalateDays > 14) return replyEphemeral(i, '❌ القيم غير صحيحة.', COLORS.danger);
+      settings.setPolicy('resignationNoticeDays', noticeDays);
+      settings.setPolicy('resignationEscalateDays', escalateDays);
+      return replyEphemeral(i, '✅ تم تحديث سياسات الاستقالة.', COLORS.success);
+    },
+    'setup:policies-reset': async (i) => {
+      for (const k of ['leaveMaxConcurrent', 'leaveMaxDays', 'leaveMaxDaysPer90', 'leavePendingExpireDays', 'resignationNoticeDays', 'resignationEscalateDays', 'vacationRoleTiming']) settings.resetPolicy(k);
+      return i.update(policiesPage());
+    },
 
     'setup:pickrole': async (i, [team, idx]) => {
       const ranks = team === 'support' ? SUPPORT_RANKS : team === 'moderation' ? MOD_RANKS : team === 'general_management' ? GENERAL_MANAGEMENT_RANKS : SYSTEM_ROLES;

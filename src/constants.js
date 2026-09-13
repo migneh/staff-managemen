@@ -83,6 +83,53 @@ const ABSENCE = { dmHours: 72, staffAlertHours: 96, idleDays: 7 };
 // ===== الإجازات =====
 const LEAVE_TYPES = { normal: 'عادية', emergency: 'طارئة', sick: 'مرضية', study: 'دراسة', special: 'ظروف خاصة' };
 
+// قواعد تفصيلية لكل نوع: الحد للمدة، أدنى مدة إشعار، وسقف متحرك يمنع الإدمان على النوع نفسه.
+const LEAVE_RULES = {
+  normal:    { emoji: '🏖️', maxDays: 14, minNoticeHours: 48, maxDaysPer90: 30, note: 'خُطط إجازتك مبكراً — تحتاج موافقة مسبقاً بـ 48 ساعة.' },
+  emergency: { emoji: '🚨', maxDays: 3,  minNoticeHours: 0,  maxDaysPer90: 7,  note: 'للظروف الطارئة — تُبلّغ الإدارة أولاً ثم تقدّم الطلب خلال 24 ساعة.' },
+  sick:      { emoji: '🤒', maxDays: 10, minNoticeHours: 0,  maxDaysPer90: 20, note: 'أرفق تقريراً طبياً عند الإمكان لتفادي الرفض.' },
+  study:     { emoji: '📚', maxDays: 7,  minNoticeHours: 24, maxDaysPer90: 14, note: 'لفترات الاختبارات — يُفضّل جدول الجامعة.' },
+  special:   { emoji: '🕊️', maxDays: 7,  minNoticeHours: 12, maxDaysPer90: 14, note: 'ظروف عائلية/شخصية طارئة.' },
+};
+
+// قيود عامة على دورة الإجازة.
+const LEAVE_GLOBAL = {
+  maxDays: 30,            // أطول إجازة واحدة
+  maxConcurrent: 3,       // أقصى عدد مجازين في اليوم نفسه
+  pendingExpireDays: 10,  // يسقط الطلب المعلّق تلقائياً بعد انتهائها دون مراجعة
+  minGapDays: 1,          // يوم راحة بين إجازتين معتمدتين
+  maxDaysPer90: 30,       // سقف متحرك لكل إداري خلال 90 يوماً
+  reminderBeforeDays: 1,  // تذكير قبل البداية
+  returnWarnHours: 24,    // تنبيه الإدارة إن لم يعد بعد النهاية
+};
+
+// متى تُمنح رتبة `in vacation`
+const VACATION_ROLE_TIMING = { at_start: 'عند بداية الإجازة (موصى به)', at_approval: 'فور الموافقة على الطلب' };
+
+// ===== الاستقالات =====
+const RESIGNATION_REASONS = {
+  workload:   { label: 'ضغط العمل والدوام', emoji: '🔥', retention: true },
+  pay:        { label: 'الراتب أو البدلات', emoji: '💰', retention: true },
+  personal:   { label: 'ظروف شخصية أو عائلية', emoji: '🏠', retention: false },
+  study:      { label: 'الدراسة والتطوير', emoji: '🎓', retention: false },
+  management: { label: 'خلاف مع الإدارة', emoji: '⚖️', retention: true },
+  burnout:    { label: 'إرهاق أو فقدان دافع', emoji: '🔋', retention: true },
+  restructure:{ label: 'تغييرات في السيرفر', emoji: '🧩', retention: true },
+  other:      { label: 'سبب آخر', emoji: '📝', retention: false },
+};
+
+const RESIGNATION_GLOBAL = {
+  noticeDays: 3,          // أقل فترة إشعار
+  maxBackdateDays: 0,     // لا تُقبل استقالة بتاريخ ماضٍ
+  pendingEscalateDays: 3, // تصعيد الطلب للإدارة العليا بعد
+  handoverTasks: [
+    'تسليم التكتات المفتوحة',
+    'توثيق الحالات المعلقة في السجلات',
+    'حذف أي وصوليات أو تكاملات شخصية',
+    'كتابة ملاحظة تسليم للإدارة',
+  ],
+};
+
 // ===== إجراءات الإشراف =====
 const MOD_ACTION_TYPES = { warn: 'تحذير', timeout: 'تايم أوت', kick: 'كيك', ban: 'بان', delete: 'حذف رسائل', voice: 'فويس', nickname: 'تغيير الاسم' };
 
@@ -141,6 +188,7 @@ const COOLDOWNS = { promoted: 15, rejected: 30, warning: 14, suspended: 60 };
 
 module.exports = {
   LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, STATUS, FAQ_CATEGORIES,
-  ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, MOD_ACTION_TYPES,
+  ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, LEAVE_RULES, LEAVE_GLOBAL, VACATION_ROLE_TIMING,
+  RESIGNATION_REASONS, RESIGNATION_GLOBAL, MOD_ACTION_TYPES,
   NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS,
 };

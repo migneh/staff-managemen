@@ -5,7 +5,7 @@
  */
 const { getDb } = require('../database');
 const fileConfig = require('../config');
-const { SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS } = require('../constants');
+const { SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, LEAVE_GLOBAL, LEAVE_RULES, RESIGNATION_GLOBAL, VACATION_ROLE_TIMING } = require('../constants');
 
 let cache = null;
 
@@ -20,6 +20,7 @@ function load() {
   const kv = Object.fromEntries(rows.map(r => [r.key, JSON.parse(r.value)]));
   const fileRoles = fileConfig.roles || {};
   cache = {
+    policies: Object.fromEntries(Object.entries(kv).filter(([k]) => k.startsWith('policy.')).map(([k, v]) => [k.slice(7), v])),
     roles: {
       support: { ...(fileRoles.support || {}) },
       moderation: { ...(fileRoles.moderation || {}) },
@@ -62,6 +63,51 @@ function setChannel(name, channelId) { set(`channel.${name}`, channelId); }
 function setActivity(type, ids) { set(`activity.${type}`, ids); }
 function setTicketLogBotId(botId) { set('ticketLogBotId', botId || null); }
 
+// ===== سياسات الطلبات (تُضبط من /setup وتُفضَّل على config.json) =====
+function policy(key, fallback = null) {
+  const value = load().policies?.[key];
+  return value === undefined || value === null || value === '' ? fallback : value;
+}
+function setPolicy(key, value) { set(`policy.${key}`, value); }
+function resetPolicy(key) {
+  ensureTable();
+  getDb().prepare('DELETE FROM settings WHERE key = ?').run(`policy.${key}`);
+  cache = null;
+}
+
+/** قواعد الإجازات: الافتراضي ← config.json ← إعداد /setup */
+function leavePolicy(type = null) {
+  const base = { ...LEAVE_GLOBAL, ...(fileConfig.leave || {}) };
+  const rules = Object.fromEntries(Object.entries(LEAVE_RULES).map(([key, rule]) => [key, { ...rule }]));
+  for (const [type2, rule] of Object.entries(rules)) {
+    const override = policy(`leaveType.${type2}`, {});
+    if (override && typeof override === 'object') Object.assign(rule, override);
+  }
+  const overrides = {
+    maxDays: policy('leaveMaxDays'), maxConcurrent: policy('leaveMaxConcurrent'),
+    pendingExpireDays: policy('leavePendingExpireDays'), maxDaysPer90: policy('leaveMaxDaysPer90'),
+    vacationRoleTiming: policy('vacationRoleTiming', base.vacationRoleTiming || 'at_start'),
+  };
+  for (const [k, v] of Object.entries(overrides)) if (v != null) base[k] = v;
+  const result = type ? { ...base, ...(rules[type] || {}), rules } : { ...base, rules };
+  result.maxDays = Number(result.maxDays) || LEAVE_GLOBAL.maxDays;
+  result.maxConcurrent = Number(result.maxConcurrent) || LEAVE_GLOBAL.maxConcurrent;
+  result.maxDaysPer90 = Number(result.maxDaysPer90) || LEAVE_GLOBAL.maxDaysPer90;
+  result.pendingExpireDays = Number(result.pendingExpireDays) || LEAVE_GLOBAL.pendingExpireDays;
+  result.minNoticeHours = Number(result.minNoticeHours || 0);
+  return result;
+}
+
+/** قواعد الاستقالة */
+function resignationPolicy() {
+  const base = { ...RESIGNATION_GLOBAL, ...(fileConfig.resignation || {}) };
+  const overrides = { noticeDays: policy('resignationNoticeDays'), pendingEscalateDays: policy('resignationEscalateDays') };
+  for (const [k, v] of Object.entries(overrides)) if (v != null) base[k] = v;
+  base.noticeDays = Number(base.noticeDays) || RESIGNATION_GLOBAL.noticeDays;
+  base.pendingEscalateDays = Number(base.pendingEscalateDays) || RESIGNATION_GLOBAL.pendingEscalateDays;
+  return base;
+}
+
 function roles() { return load().roles; }
 function channels() { return load().channels; }
 function activityChannels() { return load().activityChannels; }
@@ -91,6 +137,8 @@ function status() {
     ticketLogBotId: s.ticketLogBotId,
     governanceConfigured: !!governanceRoleId(),
     vacationRoleConfigured: !!vacationRoleId(),
+    leavePolicy: leavePolicy(),
+    resignationPolicy: resignationPolicy(),
     complete: missingRoles.length === 0 && missingChannels.length === 0,
     anyRole: rolesDone > 0,
   };
@@ -102,5 +150,6 @@ const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs'];
 module.exports = {
   load, set, setRole, setGovernanceRole, setChannel, setActivity, setTicketLogBotId,
   roles, channels, activityChannels, roleId, channelId, ticketLogBotId, governanceRoleId, vacationRoleId, status,
+  policy, setPolicy, resetPolicy, leavePolicy, resignationPolicy, VACATION_ROLE_TIMING,
   CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS,
 };
