@@ -128,6 +128,78 @@ describe('FAQ', () => {
   });
 });
 
+describe('قوالب FAQ', () => {
+  test('كل قالب مستقل ويمكن نشره وتعديله دون تغيير القوالب الأخرى', () => {
+    const faq = require('../src/services/faq');
+    const first = faq.addTemplate({ name: 'الدعم', title: 'دليل الدعم', description: 'للدعم فقط', categoryIds: [1, 3], color: 0x123456, userId: 'a' });
+    const second = faq.addTemplate({ name: 'الإشراف', title: 'دليل الإشراف', description: 'للإشراف فقط', categoryIds: [2], color: 0x654321, userId: 'a' });
+    faq.addPanel('message-1', 'channel-1', 'a', first.id);
+    faq.addPanel('message-2', 'channel-2', 'a', second.id);
+    assert.deepEqual(faq.templateCategories(first.id).map(c => c.id), [1, 3]);
+    assert.deepEqual(faq.templateCategories(second.id).map(c => c.id), [2]);
+    faq.editTemplate(first.id, { title: 'دليل دعم معدل', categoryIds: [4], userId: 'b' });
+    assert.equal(faq.template(second.id).title, 'دليل الإشراف');
+    assert.deepEqual(faq.panels().map(p => p.template_id), [first.id, second.id]);
+  });
+});
+
+describe('دورة الإجازات والاستقالات', () => {
+  test('يتحقق من التواريخ الميلادية بدقة', () => {
+    const { isValidDate } = require('../src/utils');
+    assert.equal(isValidDate('2026-02-28'), true);
+    assert.equal(isValidDate('2026-02-30'), false);
+    assert.equal(isValidDate('not-a-date'), false);
+  });
+
+  test('يمنع تداخل طلبات العضو ويحسب حد الإجازات المتزامنة', () => {
+    const leaves = require('../src/services/leaves');
+    const db = getDb();
+    db.prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u1', 'normal', 'r', '2026-09-15', '2026-09-20', 'pending')`).run();
+    assert.equal(leaves.userHasOverlap('u1', '2026-09-20', '2026-09-22').id, 1);
+    assert.equal(leaves.userHasOverlap('u2', '2026-09-20', '2026-09-22'), null);
+    db.prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u2', 'normal', 'r', '2026-09-16', '2026-09-18', 'approved')`).run();
+    db.prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u3', 'normal', 'r', '2026-09-17', '2026-09-19', 'approved')`).run();
+    assert.equal(leaves.concurrentApproved('2026-09-17', '2026-09-17'), 2);
+    assert.equal(leaves.approvedForUser('u2', { onOrAfter: '2026-09-17' }).length, 1);
+  });
+
+  test('يدعم سحب الاستقالة وتسجيل التذكيرات والحقول الجديدة', () => {
+    const db = getDb();
+    const result = db.prepare(`INSERT INTO resignations (user_id, reason, last_day, status) VALUES ('u1', 'r', '2026-09-30', 'pending')`).run();
+    db.prepare(`UPDATE resignations SET status = 'withdrawn', withdrawn_by = ?, withdrawn_at = datetime('now'), withdraw_reason = ? WHERE id = ?`).run('u1', 'تراجع', result.lastInsertRowid);
+    const row = db.prepare('SELECT * FROM resignations WHERE id = ?').get(result.lastInsertRowid);
+    assert.equal(row.status, 'withdrawn');
+    assert.equal(row.withdraw_reason, 'تراجع');
+    assert.equal(row.reminders_sent, '');
+  });
+
+  test('يحافظ على رتبة in vacation مع الإجازة القادمة ويزيلها بعد انتهائها', async () => {
+    const settings = require('../src/services/settings');
+    const leaves = require('../src/services/leaves');
+    const { today, addDays } = require('../src/utils');
+    const role = { id: 'vac-role', name: 'in vacation' };
+    const roleCache = new Map([[role.id, role]]);
+    const member = {
+      id: 'u1',
+      guild: { roles: { cache: roleCache } },
+      roles: {
+        cache: new Map(),
+        async add(r) { this.cache.set(r.id, r); },
+        async remove(r) { this.cache.delete(r.id); },
+      },
+    };
+    settings.setRole('system', 'in vacation', role.id);
+    const start = today();
+    const end = addDays(start, 1);
+    getDb().prepare(`INSERT INTO leave_requests (user_id, leave_type, reason, start_date, end_date, status) VALUES ('u1', 'normal', 'r', ?, ?, 'approved')`).run(start, end);
+    assert.equal((await leaves.syncVacationRole(member)).ok, true);
+    assert.equal(member.roles.cache.has(role.id), true);
+    getDb().prepare("UPDATE leave_requests SET status = 'ended' WHERE user_id = 'u1'").run();
+    assert.equal((await leaves.syncVacationRole(member)).ok, true);
+    assert.equal(member.roles.cache.has(role.id), false);
+  });
+});
+
 describe('التقارير والـ Leaderboard', () => {
   test('يستبعد Boss والمجازين', () => {
     seedStaff('b', 'support', 'Boss');
@@ -161,9 +233,11 @@ describe('الإعدادات (/setup)', () => {
     assert.equal(st.rolesDone, 0);
     assert.equal(st.complete, false);
     settings.setRole('support', 'Helper', '111');
+    settings.setRole('system', 'in vacation', 'vac-role');
     settings.setChannel('staff-faq', '222');
     settings.setActivity('ticket', ['333']);
     assert.equal(settings.roleId('support', 'Helper'), '111');
+    assert.equal(settings.vacationRoleId(), 'vac-role');
     assert.equal(settings.channelId('staff-faq'), '222');
     assert.deepEqual(settings.activityChannels().ticket, ['333']);
     st = settings.status();
@@ -173,5 +247,42 @@ describe('الإعدادات (/setup)', () => {
     // الصفحات تُبنى بدون أخطاء
     const home = setup.homePage();
     assert.equal(home.components.length, 2);
+  });
+});
+
+describe('مهام التأهيل', () => {
+  test('تُنهي فترة التجربة بعد إكمال المهام الثلاث', () => {
+    const tasks = require('../src/services/tasks');
+    const db = getDb();
+    db.prepare("INSERT INTO staff_members (user_id, username, team, rank, status) VALUES ('new', 'new', 'support', 'Helper', 'probation')").run();
+    tasks.ensureOnboarding('new');
+    assert.equal(tasks.list('new').length, 3);
+    for (const task of tasks.list('new')) assert.ok(tasks.complete(task.id, 'new'));
+    assert.equal(db.prepare("SELECT status FROM staff_members WHERE user_id = 'new'").get().status, 'active');
+  });
+});
+
+describe('استيراد سجل التكتات الخارجي', () => {
+  test('يحلل رسالة البوت ويسجلها مرة واحدة فقط', () => {
+    const settings = require('../src/services/settings');
+    const ticketLogs = require('../src/services/ticketLogs');
+    settings.setChannel('ticket-source-logs', '999');
+    const message = {
+      id: '123456789012345678',
+      url: 'https://discord.com/channels/g/c/m',
+      author: { bot: true, id: '777', tag: 'Ticket Bot' },
+      channel: { id: '999' },
+      embeds: [{ title: 'سجل التكت رقم close-2127', description: 'صاحب التكت : <@1504915482904363099>\\nمستلم التذكرة : <@1005171993940852796>\\nالي قفل التكت : <@1442619466973980735>\\nرقم التكت : #close-2127\\nجميع الرسائل : [اضغط هنا](https://example.com/close-2127.html)' }],
+    };
+    const parsed = ticketLogs.parseExternalTicketMessage(message);
+    assert.equal(parsed.ticketId, 'close-2127');
+    assert.equal(parsed.claimer, '1005171993940852796');
+    assert.equal(parsed.closer, '1442619466973980735');
+    const first = ticketLogs.recordTicket(parsed);
+    assert.equal(first.duplicate, false);
+    assert.equal(first.earned, 2);
+    const second = ticketLogs.recordTicket(parsed);
+    assert.equal(second.duplicate, true);
+    assert.equal(getDb().prepare('SELECT COUNT(*) c FROM ticket_metrics').get().c, 1);
   });
 });

@@ -3,7 +3,7 @@ const {
   SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
   ChannelType, PermissionFlagsBits, StringSelectMenuBuilder,
 } = require('discord.js');
-const { LEVELS, SUPPORT_RANKS, MOD_RANKS, TEAMS } = require('../constants');
+const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS } = require('../constants');
 const settings = require('../services/settings');
 const { embed, COLORS, replyEphemeral, progressBar } = require('../utils');
 
@@ -18,6 +18,7 @@ const CHANNEL_META = {
   'ticket-logs': { label: 'سجل التكتات', emoji: '🎫', desc: 'التكتات المسجلة' },
   'mod-logs': { label: 'سجل الإشراف', emoji: '🛡️', desc: 'الإجراءات الإشرافية' },
   'manager-review': { label: 'مراجعة الإدارة', emoji: '📈', desc: 'طلبات الترقية' },
+  'ticket-source-logs': { label: 'مصدر سجل التكتات الخارجي', emoji: '🤖', desc: 'القناة التي يرسل فيها بوت التكتات رسالة الإغلاق — اختيارية' },
 };
 const ACTIVITY_META = {
   ticket: { label: 'قنوات التكتات', emoji: '🎫', weight: '50%' },
@@ -37,31 +38,36 @@ function homePage() {
     ? '✅ **الإعداد مكتمل!** البوت جاهز للعمل. يمكنك تعديل أي شيء من الأزرار أدناه.'
     : `أكمل الخطوات التالية لتشغيل البوت. كل خطوة قائمة اختيار — **بدون نسخ معرفات**.`, st.complete ? COLORS.success : COLORS.primary)
     .addFields(
-      { name: `1️⃣ الرتب — ${st.rolesDone}/${st.rolesTotal}  ${progressBar(st.rolesDone, st.rolesTotal, 12)}`, value: `**🎧 الدعم الفني**\n${roleLine('support', SUPPORT_RANKS)}\n\n**🛡️ الإشراف**\n${roleLine('moderation', MOD_RANKS)}` },
+      { name: `1️⃣ الرتب — ${st.rolesDone}/${st.rolesTotal}  ${progressBar(st.rolesDone, st.rolesTotal, 12)}`, value: `**🎧 الدعم الفني**\n${roleLine('support', SUPPORT_RANKS)}\n\n**🛡️ الإشراف**\n${roleLine('moderation', MOD_RANKS)}\n\n**🏛️ الإدارة العامة**\n${roleLine('general_management', GENERAL_MANAGEMENT_RANKS)}\n\n**🏖️ الرتب التلقائية**\n${roleLine('system', SYSTEM_ROLES)}\n${st.vacationRoleConfigured ? '✅ رتبة **in vacation** مرتبطة' : '⚠️ رتبة **in vacation** غير مرتبطة'}` },
       { name: `2️⃣ القنوات — ${st.channelsDone}/${st.channelsTotal}  ${progressBar(st.channelsDone, st.channelsTotal, 12)}`, value: chanLine },
-      { name: '3️⃣ قنوات النشاط (اختياري)', value: actLine + '\n_القنوات غير المحددة تُعتبر عامة (10%)، وقنوات `ticket-…` تُكتشف تلقائياً._' },
+      { name: '3️⃣ قنوات النشاط والتكتات الخارجية', value: actLine + `\n🤖 مصدر سجل التكتات: ${s.channels['ticket-source-logs'] ? `<#${s.channels['ticket-source-logs']}>` : '_غير محدد_'}\n_القنوات غير المحددة تُعتبر عامة (10%)، وقنوات \`ticket-…\` تُكتشف تلقائياً._` },
+      { name: '4️⃣ صلاحية Server Manager', value: st.governanceConfigured ? `<@&${settings.governanceRoleId()}>` : '_اختيارية — إذا لم تحددها فمالك السيرفر فقط يستطيع تعيين الإدارة العامة_' },
     )
     .setFooter({ text: 'الإعدادات تُحفظ فوراً في قاعدة البيانات' });
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('setup:roles:support:0').setLabel('رتب الدعم الفني').setEmoji('🎧').setStyle(st.missingRoles.some(m => m.team === 'support') ? ButtonStyle.Primary : ButtonStyle.Success),
     new ButtonBuilder().setCustomId('setup:roles:moderation:0').setLabel('رتب الإشراف').setEmoji('🛡️').setStyle(st.missingRoles.some(m => m.team === 'moderation') ? ButtonStyle.Primary : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('setup:roles:general_management:0').setLabel('الإدارة العامة').setEmoji('🏛️').setStyle(st.missingRoles.some(m => m.team === 'general_management') ? ButtonStyle.Primary : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('setup:roles:system:0').setLabel('رتبة الإجازة').setEmoji('🏖️').setStyle(st.vacationRoleConfigured ? ButtonStyle.Success : ButtonStyle.Primary),
   );
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('setup:channels:0').setLabel('تحديد القنوات').setEmoji('📁').setStyle(st.missingChannels.length ? ButtonStyle.Primary : ButtonStyle.Success),
     new ButtonBuilder().setCustomId('setup:autocreate').setLabel('إنشاء القنوات الناقصة تلقائياً').setEmoji('✨').setStyle(ButtonStyle.Secondary).setDisabled(!st.missingChannels.length),
     new ButtonBuilder().setCustomId('setup:activity').setLabel('قنوات النشاط').setEmoji('📡').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('setup:ticket-source').setLabel('مصدر سجل التكتات').setEmoji('🤖').setStyle(st.ticketSourceConfigured ? ButtonStyle.Success : ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('setup:governance').setLabel('Server Manager').setEmoji('👑').setStyle(st.governanceConfigured ? ButtonStyle.Success : ButtonStyle.Secondary),
   );
   return { embeds: [e], components: [row1, row2] };
 }
 
 // ===== صفحة الرتب: رتبة واحدة في كل خطوة مع قائمة اختيار الرتب =====
 function rolesPage(team, idx) {
-  const ranks = team === 'support' ? SUPPORT_RANKS : MOD_RANKS;
+  const ranks = team === 'support' ? SUPPORT_RANKS : team === 'moderation' ? MOD_RANKS : team === 'general_management' ? GENERAL_MANAGEMENT_RANKS : SYSTEM_ROLES;
   idx = Math.max(0, Math.min(idx, ranks.length - 1));
   const r = ranks[idx];
   const cur = settings.roleId(team, r.name);
-  const e = embed(`${team === 'support' ? '🎧' : '🛡️'} رتب ${TEAMS[team]} — ${idx + 1}/${ranks.length}`,
+  const e = embed(`${team === 'support' ? '🎧' : team === 'moderation' ? '🛡️' : team === 'general_management' ? '🏛️' : '🏖️'} رتب ${team === 'system' ? 'الحالات التلقائية' : TEAMS[team]} — ${idx + 1}/${ranks.length}`,
     `اختر رتبة الديسكورد المقابلة لـ:\n\n# ${r.name}\n**الفئة:** ${r.category}${r.perms ? `\n**الصلاحيات:** ${r.perms}` : ''}${r.handlesTickets === false ? '\n_لا يستلم تكتات_' : ''}\n\n**الحالي:** ${cur ? `<@&${cur}>` : '_غير محدد_'}`, COLORS.info)
     .setFooter({ text: `${progressBar(idx + 1, ranks.length, ranks.length)}  •  اختر من القائمة وسينتقل للرتبة التالية تلقائياً` });
   const select = new RoleSelectMenuBuilder().setCustomId(`setup:pickrole:${team}:${idx}`).setPlaceholder(`🔽 اختر رتبة ${r.name}`).setMinValues(1).setMaxValues(1);
@@ -106,10 +112,33 @@ function activityPage() {
   return { embeds: [e], components: rows };
 }
 
+// ===== إعداد مصدر سجل التكتات الخارجي =====
+function ticketSourcePage() {
+  const cur = settings.channelId('ticket-source-logs');
+  const botId = settings.ticketLogBotId();
+  const e = embed('🤖 مصدر سجل التكتات الخارجي',
+    `اختر القناة التي يرسل فيها بوت التكتات رسالة الإغلاق (مثل: \`close-2127\`).\n\n**القناة الحالية:** ${cur ? `<#${cur}>` : '_غير محددة_'}\n**معرف البوت (اختياري):** ${botId ? `\`${botId}\`` : '_أي بوت داخل القناة_' }\n\nبعد تحديدها سيقرأ Staff Manager الرسالة تلقائياً ويحتسب التكت والنقاط. لا يحتاج البوتان إلى التكامل مع بعضهما، ولا يحتاج الدعم لاستخدام \`/log-ticket\`.`, COLORS.info);
+  const select = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder().setCustomId('setup:pickticketsource').setPlaceholder('🔽 اختر قناة سجل بوت التكتات').addChannelTypes(ChannelType.GuildText).setMinValues(1).setMaxValues(1),
+  );
+  const nav = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary));
+  return { embeds: [e], components: [select, nav] };
+}
+
+// ===== إعداد رتبة Server Manager =====
+function governancePage() {
+  const cur = settings.governanceRoleId();
+  const e = embed('👑 صلاحية Server Manager',
+    `اختر رتبة مالكي السيرفر/Server Manager المسموح لها بتعيين الإدارة العامة.\n\n**الحالي:** ${cur ? `<@&${cur}>` : '_غير محدد_'}\n\nمالك السيرفر يستطيع دائماً استخدام الأمر. **General Manager الحالي** يستطيع أيضاً تعيين أو إزالة أعضاء الإدارة العامة. Co General Manager لا يملك هذه الصلاحية.`, COLORS.info);
+  const select = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup:pickgovernance').setPlaceholder('🔽 اختر رتبة Server Manager').setMinValues(1).setMaxValues(1));
+  const nav = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary));
+  return { embeds: [e], components: [select, nav] };
+}
+
 // ===== المطابقة التلقائية =====
 const norm = (s) => s.toLowerCase().replace(/[\s_\-]+/g, '');
 function autoMatchRoles(guild, team) {
-  const ranks = team === 'support' ? SUPPORT_RANKS : MOD_RANKS;
+  const ranks = team === 'support' ? SUPPORT_RANKS : team === 'moderation' ? MOD_RANKS : team === 'general_management' ? GENERAL_MANAGEMENT_RANKS : SYSTEM_ROLES;
   const matched = [];
   for (const r of ranks) {
     const role = guild.roles.cache.find(x => norm(x.name) === norm(r.name)) || guild.roles.cache.find(x => norm(x.name).includes(norm(r.name)) && !ranks.some(o => o !== r && norm(x.name) === norm(o.name)));
@@ -130,8 +159,8 @@ async function autoCreate(guild, botMember) {
   const st = settings.status();
   if (!st.missingChannels.length) return { created: [], category: null };
   let category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && /staff.?manager|إدارة الفريق/i.test(c.name));
-  const staffRoleIds = [...Object.values(settings.roles().support), ...Object.values(settings.roles().moderation)].filter(Boolean);
-  const managementIds = [settings.roleId('support', 'Support Office'), settings.roleId('support', 'Boss'), settings.roleId('moderation', 'Head Of Moderators')].filter(Boolean);
+  const staffRoleIds = [...Object.values(settings.roles().support), ...Object.values(settings.roles().moderation), ...Object.values(settings.roles().general_management)].filter(Boolean);
+  const managementIds = [settings.roleId('support', 'Support Office'), settings.roleId('support', 'Boss'), settings.roleId('moderation', 'Head Of Moderators'), settings.roleId('general_management', 'Co General Manager'), settings.roleId('general_management', 'General Manager')].filter(Boolean);
   const overwrites = (allowedIds) => [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
     { id: botMember.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] },
@@ -166,9 +195,11 @@ module.exports = {
     'setup:roles': async (i, [team, idx]) => i.update(rolesPage(team, Number(idx))),
     'setup:channels': async (i, [idx]) => i.update(channelsPage(Number(idx))),
     'setup:activity': async (i) => i.update(activityPage()),
+    'setup:ticket-source': async (i) => i.update(ticketSourcePage()),
+    'setup:governance': async (i) => i.update(governancePage()),
 
     'setup:pickrole': async (i, [team, idx]) => {
-      const ranks = team === 'support' ? SUPPORT_RANKS : MOD_RANKS;
+      const ranks = team === 'support' ? SUPPORT_RANKS : team === 'moderation' ? MOD_RANKS : team === 'general_management' ? GENERAL_MANAGEMENT_RANKS : SYSTEM_ROLES;
       const n = Number(idx);
       const roleId = i.values[0];
       const role = i.guild.roles.cache.get(roleId);
@@ -188,6 +219,14 @@ module.exports = {
     'setup:pickactivity': async (i, [type]) => {
       settings.setActivity(type, i.values);
       return i.update(activityPage());
+    },
+    'setup:pickticketsource': async (i) => {
+      settings.setChannel('ticket-source-logs', i.values[0]);
+      return i.update(ticketSourcePage());
+    },
+    'setup:pickgovernance': async (i) => {
+      settings.setGovernanceRole(i.values[0]);
+      return i.update(governancePage());
     },
     'setup:autoroles': async (i, [team]) => {
       const matched = autoMatchRoles(i.guild, team);

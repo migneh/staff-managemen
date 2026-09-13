@@ -1,9 +1,10 @@
 'use strict';
 const { SlashCommandBuilder } = require('discord.js');
-const { LEVELS, NOTE_TYPES, WARNING_TYPES, COOLDOWNS } = require('../constants');
+const { LEVELS, NOTE_TYPES, WARNING_TYPES, COOLDOWNS, TEAMS } = require('../constants');
 const { getDb } = require('../database');
 const points = require('../services/points');
 const staffService = require('../services/staff');
+const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, dm, log, discordTs } = require('../utils');
 
 function recordEmbed(userId, { includeSecret }) {
@@ -12,7 +13,7 @@ function recordEmbed(userId, { includeSecret }) {
   const warns = db.prepare('SELECT * FROM warnings WHERE user_id = ? ORDER BY id DESC LIMIT 10').all(userId);
   const s = staffService.get(userId);
   const e = embed(`📁 سجل <@${userId}>`.replace('<@', '').replace('>', ''), null, COLORS.info)
-    .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${s.team === 'support' ? 'الدعم الفني' : 'الإشراف'}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
+    .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
   e.addFields({
     name: `⚠️ الإنذارات (${warns.length})`,
     value: warns.length ? warns.map(w => `${WARNING_TYPES[w.warning_type]?.emoji} **${WARNING_TYPES[w.warning_type]?.label}** — ${w.reason} • ${discordTs(w.created_at, 'd')} • <@${w.issued_by}>`).join('\n').slice(0, 1024) : 'لا يوجد',
@@ -41,6 +42,7 @@ module.exports = {
         if (!target) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
         const res = getDb().prepare('INSERT INTO staff_notes (user_id, note_type, content, is_secret, added_by) VALUES (?, ?, ?, ?, ?)').run(user.id, type, content, secret, i.user.id);
         const pts = points.add(user.id, type === 'positive' ? 'positive_note' : 'negative_note', target.team, { refType: 'note', refId: res.lastInsertRowid, addedBy: i.user.id });
+        audit.record({ action: 'staff_note_added', actorId: i.user.id, targetId: user.id, details: { type, secret: !!secret, rowId: res.lastInsertRowid }, channelId: i.channelId });
         const def = NOTE_TYPES[type];
         await replyEphemeral(i, `${def.emoji} تمت إضافة ${def.label} على <@${user.id}> (${pts > 0 ? '+' : ''}${pts} نقطة)${secret ? ' 🔒' : ''}.`, COLORS.success);
         if (!secret) await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label} جديدة`, `${content}\n\n**النقاط:** ${pts > 0 ? '+' : ''}${pts}`, type === 'positive' ? COLORS.success : COLORS.warning)] });
@@ -66,6 +68,7 @@ module.exports = {
 
         const res = getDb().prepare('INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES (?, ?, ?, ?)').run(user.id, type, reason, i.user.id);
         const pts = points.add(user.id, type === 'verbal' ? 'verbal_warning' : 'formal_warning', target.team, { refType: 'warning', refId: res.lastInsertRowid, addedBy: i.user.id });
+        audit.record({ action: 'staff_warning_issued', actorId: i.user.id, targetId: user.id, details: { type, reason, rowId: res.lastInsertRowid }, channelId: i.channelId });
         let extra = '';
         if (def.suspend) { staffService.setStatus(user.id, 'suspended'); const until = points.setCooldown(user.id, 'suspended', COOLDOWNS.suspended); extra = `\n⛔ تم إيقاف العضو + تجميد الترقية حتى ${until}`; }
         else if (def.freezeDays) { const until = points.setCooldown(user.id, 'warning', def.freezeDays); extra = `\n🧊 تجميد الترقية حتى ${until}`; }

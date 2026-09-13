@@ -2,6 +2,8 @@
 const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const { LEVELS, MOD_ACTION_TYPES } = require('../constants');
 const { getDb } = require('../database');
+const ticketLogs = require('../services/ticketLogs');
+const audit = require('../services/audit');
 const points = require('../services/points');
 const staffService = require('../services/staff');
 const { embed, COLORS, replyEphemeral, sendToChannel } = require('../utils');
@@ -11,17 +13,42 @@ const field = (id, label, opts = {}) => new ActionRowBuilder().addComponents(
   new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(opts.long ? TextInputStyle.Paragraph : TextInputStyle.Short)
     .setRequired(opts.required ?? true).setMaxLength(opts.max || 100).setPlaceholder(opts.ph || ''));
 
+function ticketEmbed(result, loggedBy, sourceLabel = 'يدوي') {
+  const row = result.row;
+  return embed(`🎫 تكت مسجل ${result.reopened ? '♻️' : ''}`, null, result.reopened ? COLORS.warning : COLORS.success).addFields(
+    { name: 'رقم التكت', value: `\`${row.ticketId}\``, inline: true },
+    { name: 'صاحب التكت', value: `<@${row.owner}>`, inline: true },
+    { name: 'المستلم', value: `<@${row.claimer}>`, inline: true },
+    { name: 'أغلقه', value: `<@${row.closer || row.claimer}>`, inline: true },
+    { name: 'التقييم', value: row.rating ? '⭐'.repeat(row.rating) : '—', inline: true },
+    { name: 'المدة', value: row.duration != null ? `${row.duration} دقيقة` : '—', inline: true },
+    { name: 'النقاط', value: `${result.earned >= 0 ? '+' : ''}${result.earned}`, inline: true },
+    { name: 'المصدر', value: sourceLabel, inline: true },
+    ...(row.ticketUrl ? [{ name: 'سجل التكت الخارجي', value: row.ticketUrl }] : []),
+  ).setFooter({ text: `السجل #${row.id}${result.reopened ? ' • تكت معاد فتحه' : ''}` });
+}
+
+async function saveTicket(i, input, sourceLabel = 'يدوي') {
+  const result = ticketLogs.recordTicket(input);
+  if (result.duplicate) return replyEphemeral(i, 'ℹ️ هذا السجل الخارجي تم احتسابه مسبقاً، ولن تُضاف نقاط مكررة.', COLORS.info);
+  audit.record({ action: 'ticket_logged', actorId: i.user.id, targetId: input.claimer, details: { ticketId: input.ticketId, source: input.source || 'manual', rowId: result.row.id }, channelId: i.channelId });
+  const e = ticketEmbed(result, i.user.id, sourceLabel);
+  await sendToChannel(i.client, 'ticket-logs', { embeds: [e] });
+  return i.reply({ embeds: [e], ephemeral: true });
+}
+
 module.exports = {
   commands: [
     {
-      data: new SlashCommandBuilder().setName('log-ticket').setDescription('تسجيل تكت مغلق (فريق الدعم الفني)'),
+      data: new SlashCommandBuilder().setName('log-ticket').setDescription('تسجيل تكت مغلق يدوياً (بديل عند تعطل سجل البوت الخارجي)'),
       level: LEVELS.STAFF, team: 'support',
       async execute(i) {
-        const m = new ModalBuilder().setCustomId('ticket:log').setTitle('🎫 تسجيل تكت');
+        const m = new ModalBuilder().setCustomId('ticket:log').setTitle('🎫 تسجيل تكت يدوي');
         m.addComponents(
           field('ticket_id', 'رقم التكت', { max: 40 }),
           field('owner', 'ID صاحب التكت', { max: 22, ph: '123456789012345678' }),
-          field('claimer', 'ID من استلم التكت', { max: 22, ph: 'اتركه = ID الخاص بك' , required: false }),
+          field('claimer', 'ID من استلم التكت', { max: 22, ph: 'اتركه = ID الخاص بك', required: false }),
+          field('closer', 'ID من قفل التكت — اختياري', { max: 22, required: false }),
           field('rating', 'تقييم العميل (1-5) — اختياري', { max: 1, required: false }),
           field('duration', 'مدة الحل بالدقائق — اختياري', { max: 5, required: false }),
         );
@@ -52,43 +79,15 @@ module.exports = {
       const ticketId = i.fields.getTextInputValue('ticket_id').trim();
       const owner = i.fields.getTextInputValue('owner').trim();
       const claimer = (i.fields.getTextInputValue('claimer') || '').trim() || i.user.id;
+      const closer = (i.fields.getTextInputValue('closer') || '').trim() || claimer;
       const ratingRaw = (i.fields.getTextInputValue('rating') || '').trim();
       const durRaw = (i.fields.getTextInputValue('duration') || '').trim();
-      if (!ID_RE.test(owner) || !ID_RE.test(claimer)) return replyEphemeral(i, '❌ معرفات الأعضاء غير صحيحة.', COLORS.danger);
+      if (!ID_RE.test(owner) || !ID_RE.test(claimer) || !ID_RE.test(closer)) return replyEphemeral(i, '❌ معرفات الأعضاء غير صحيحة.', COLORS.danger);
       const rating = ratingRaw ? Number(ratingRaw) : null;
       if (rating != null && !(rating >= 1 && rating <= 5)) return replyEphemeral(i, '❌ التقييم يجب أن يكون بين 1 و 5.', COLORS.danger);
       const duration = durRaw ? Number(durRaw) : null;
       if (duration != null && !(duration >= 0)) return replyEphemeral(i, '❌ المدة غير صحيحة.', COLORS.danger);
-
-      const db = getDb();
-      const existing = db.prepare('SELECT id FROM ticket_metrics WHERE ticket_id = ?').get(ticketId);
-      if (existing) {
-        db.prepare('UPDATE ticket_metrics SET reopened = reopened + 1 WHERE id = ?').run(existing.id);
-        const claimerStaff = staffService.get(claimer);
-        points.add(claimer, 'ticket_reopened', claimerStaff?.team || 'support', { refType: 'ticket', refId: ticketId });
-      }
-      const res = db.prepare(`INSERT INTO ticket_metrics (ticket_id, ticket_owner, claimer, closer, rating, duration, logged_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .run(ticketId, owner, claimer, claimer, rating, duration, i.user.id);
-
-      // نقاط الترقية
-      const claimerStaff = staffService.get(claimer);
-      const team = claimerStaff?.team || 'support';
-      let earned = points.add(claimer, 'ticket_closed', team, { refType: 'ticket', refId: ticketId });
-      if (rating === 5) earned += points.add(claimer, 'ticket_rating_5', team, { refType: 'ticket', refId: ticketId });
-      else if (rating === 4) earned += points.add(claimer, 'ticket_rating_4', team, { refType: 'ticket', refId: ticketId });
-      else if (rating != null && rating <= 2) earned += points.add(claimer, 'ticket_rating_low', team, { refType: 'ticket', refId: ticketId });
-
-      const e = embed('🎫 تكت مسجل', null, COLORS.success).addFields(
-        { name: 'رقم التكت', value: `\`${ticketId}\``, inline: true },
-        { name: 'صاحب التكت', value: `<@${owner}>`, inline: true },
-        { name: 'المستلم', value: `<@${claimer}>`, inline: true },
-        { name: 'التقييم', value: rating ? '⭐'.repeat(rating) : '—', inline: true },
-        { name: 'المدة', value: duration != null ? `${duration} دقيقة` : '—', inline: true },
-        { name: 'النقاط', value: `${earned >= 0 ? '+' : ''}${earned}`, inline: true },
-        { name: 'سجّله', value: `<@${i.user.id}>`, inline: true },
-      ).setFooter({ text: `السجل #${res.lastInsertRowid}${existing ? ' • ⚠️ تكت معاد فتحه' : ''}` });
-      await sendToChannel(i.client, 'ticket-logs', { embeds: [e] });
-      return i.reply({ embeds: [e], ephemeral: true });
+      return saveTicket(i, { ticketId, owner, claimer, closer, rating, duration, loggedBy: i.user.id, source: 'manual' });
     },
 
     'modaction:log': async (i, [type]) => {
@@ -102,6 +101,7 @@ module.exports = {
       const res = getDb().prepare(`INSERT INTO mod_actions (moderator_id, target_id, action_type, reason, duration, evidence) VALUES (?, ?, ?, ?, ?, ?)`)
         .run(i.user.id, target, type, reason, duration, evidence);
       const earned = points.add(i.user.id, 'mod_action', 'moderation', { refType: 'mod_action', refId: res.lastInsertRowid });
+      audit.record({ action: 'moderation_action_logged', actorId: i.user.id, targetId: target, details: { type, reason, evidence, rowId: res.lastInsertRowid }, channelId: i.channelId });
 
       const e = embed(`🛡️ إجراء إشرافي: ${MOD_ACTION_TYPES[type]}`, null, COLORS.warning).addFields(
         { name: 'المشرف', value: `<@${i.user.id}>`, inline: true },
