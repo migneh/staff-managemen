@@ -8,10 +8,12 @@ const staffService = require('./services/staff');
 const activity = require('./services/activity');
 const scheduler = require('./scheduler');
 const settings = require('./services/settings');
+const { deployCommands } = require('./deploy-commands');
 const { replyEphemeral, COLORS, log } = require('./utils');
 const { TEAMS } = require('./constants');
 
 if (!config.token) { console.error('❌ DISCORD_TOKEN غير موجود في .env'); process.exit(1); }
+if (!config.guildId) { console.error('❌ GUILD_ID غير موجود في .env'); process.exit(1); }
 
 getDb();
 
@@ -20,8 +22,18 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`✅ ${c.user.tag} جاهز — Staff Manager Bot`);
+
+  // تسجيل أوامر السلاش تلقائياً عند كل تشغيل
+  // (لا حاجة لأمر deploy منفصل — مناسب للاستضافات مثل Wispbyte التي تشغّل index.js فقط)
+  if (process.env.SKIP_DEPLOY !== 'true') {
+    try {
+      if (!config.clientId) config.clientId = c.user.id; // يُكتشف تلقائياً من التوكن
+      await deployCommands();
+    } catch (e) { console.error('❌ فشل تسجيل الأوامر:', e.message); }
+  }
+
   const st = settings.status();
   if (!st.complete) console.log(`⚙️  الإعداد غير مكتمل (رتب ${st.rolesDone}/${st.rolesTotal} • قنوات ${st.channelsDone}/${st.channelsTotal}) — استخدم /setup داخل السيرفر.`);
   scheduler.start(client);
@@ -42,19 +54,24 @@ client.on(Events.MessageCreate, async (msg) => {
 
 // ===== تحديث الرتبة عند تغيير رتب الديسكورد =====
 client.on(Events.GuildMemberUpdate, (oldM, newM) => {
-  try { if (newM.guild.id === config.guildId && staffService.get(newM.id) && resolveStaff(newM)) staffService.ensure(newM); } catch (e) { console.error(e); }
+  try {
+    if (newM.guild.id === config.guildId && staffService.get(newM.id) && resolveStaff(newM)) staffService.ensure(newM);
+  } catch (e) { console.error(e); }
 });
 
 // ===== الأوامر والمكونات =====
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (!i.inGuild() || i.guildId !== config.guildId) return;
+
     const isAdmin = i.member.permissions.has(PermissionFlagsBits.Administrator);
     const isSetup = (i.isChatInputCommand() && i.commandName === 'setup') || (i.customId && i.customId.startsWith('setup:'));
+    let info = null;
+
     if (isSetup) {
       if (!isAdmin) return replyEphemeral(i, '❌ الإعداد متاح لمن يملك صلاحية **Administrator** فقط.', COLORS.danger);
     } else {
-      const info = resolveStaff(i.member);
+      info = resolveStaff(i.member);
       if (!info) {
         const st = settings.status();
         if (!st.anyRole && isAdmin) return replyEphemeral(i, '👋 **أهلاً!** البوت لم يُعدّ بعد.\nاستخدم **`/setup`** لتحديد الرتب والقنوات بقوائم اختيار سهلة (دقيقتان).', COLORS.warning);
@@ -73,11 +90,13 @@ client.on(Events.InteractionCreate, async (i) => {
       if (cmd.maxLevel && info.level > cmd.maxLevel) return replyEphemeral(i, '❌ هذا الأمر غير متاح لرتبتك.', COLORS.danger);
       if (cmd.team && info.team !== cmd.team) return replyEphemeral(i, `❌ هذا الأمر خاص بـ **${TEAMS[cmd.team]}**.`, COLORS.danger);
       const s = staffService.get(i.user.id);
-      if (s?.status === 'suspended' && !['my-record', 'my-performance', 'faq', 'faq-list', 'resign'].includes(i.commandName)) return replyEphemeral(i, '⛔ حسابك الإداري موقوف حالياً.', COLORS.danger);
+      if (s?.status === 'suspended' && !['my-record', 'my-performance', 'faq', 'faq-list', 'resign', 'help', 'me'].includes(i.commandName)) {
+        return replyEphemeral(i, '⛔ حسابك الإداري موقوف حالياً.', COLORS.danger);
+      }
       return await cmd.execute(i);
     }
 
-    if (i.isButton() || i.isStringSelectMenu() || i.isModalSubmit()) {
+    if (i.isButton() || i.isAnySelectMenu() || i.isModalSubmit()) {
       const r = resolveComponent(i.customId);
       if (!r) return;
       return await r.handler(i, r.args);
@@ -86,6 +105,10 @@ client.on(Events.InteractionCreate, async (i) => {
     console.error(`خطأ في التفاعل ${i.commandName || i.customId}:`, e);
     try { await replyEphemeral(i, '❌ حدث خطأ غير متوقع. تم تسجيله.', COLORS.danger); } catch {}
   }
+});
+
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
+client.login(config.token);  }
 });
 
 process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
