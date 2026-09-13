@@ -35,7 +35,7 @@ function section(id, level, team) {
     ].join('\n'), COLORS.primary);
     case 'faq': return embed('📚 قاعدة المعرفة', [
       cmd('faq', 'تصفح التصنيفات (11 تصنيف)'), cmd('faq-list', 'كل المدخلات في قائمة واحدة'), '',
-      '**الإدارة العليا:**', cmd('faq-add', 'إضافة مدخل (نموذج)'), cmd('faq-edit', 'تعديل مدخل — يُطلب من الجميع إعادة قراءته'), cmd('faq-delete', 'حذف مع بقاء النسخة في التاريخ'), cmd('faq-panel', 'لوحة ثابتة في القناة تتحدث تلقائياً'), cmd('faq-refresh', 'تحديث اللوحات يدوياً'),
+      '**الإدارة العليا:**', cmd('faq-add', 'إضافة مدخل (نموذج)'), cmd('faq-edit', 'تعديل مدخل — يُطلب من الجميع إعادة قراءته'), cmd('faq-delete', 'حذف مع بقاء النسخة في التاريخ'), cmd('faq-panel', 'نشر اللوحة الافتراضية'), cmd('faq-template-create', 'إنشاء قالب FAQ مستقل'), cmd('faq-template-send', 'نشر قالب في أي قناة'), cmd('faq-template-edit', 'تعديل قالب ولوحاته فقط'), cmd('faq-refresh', 'تحديث اللوحات يدوياً'),
     ].join('\n'), COLORS.info);
     case 'work': return embed('🎫 تسجيل العمل', [
       '**فريق الدعم الفني:**',

@@ -128,6 +128,21 @@ describe('FAQ', () => {
   });
 });
 
+describe('قوالب FAQ', () => {
+  test('كل قالب مستقل ويمكن نشره وتعديله دون تغيير القوالب الأخرى', () => {
+    const faq = require('../src/services/faq');
+    const first = faq.addTemplate({ name: 'الدعم', title: 'دليل الدعم', description: 'للدعم فقط', categoryIds: [1, 3], color: 0x123456, userId: 'a' });
+    const second = faq.addTemplate({ name: 'الإشراف', title: 'دليل الإشراف', description: 'للإشراف فقط', categoryIds: [2], color: 0x654321, userId: 'a' });
+    faq.addPanel('message-1', 'channel-1', 'a', first.id);
+    faq.addPanel('message-2', 'channel-2', 'a', second.id);
+    assert.deepEqual(faq.templateCategories(first.id).map(c => c.id), [1, 3]);
+    assert.deepEqual(faq.templateCategories(second.id).map(c => c.id), [2]);
+    faq.editTemplate(first.id, { title: 'دليل دعم معدل', categoryIds: [4], userId: 'b' });
+    assert.equal(faq.template(second.id).title, 'دليل الإشراف');
+    assert.deepEqual(faq.panels().map(p => p.template_id), [first.id, second.id]);
+  });
+});
+
 describe('التقارير والـ Leaderboard', () => {
   test('يستبعد Boss والمجازين', () => {
     seedStaff('b', 'support', 'Boss');

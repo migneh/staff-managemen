@@ -156,8 +156,38 @@ CREATE TABLE IF NOT EXISTS faq_panels (
   message_id TEXT PRIMARY KEY,
   channel_id TEXT NOT NULL,
   created_by TEXT NOT NULL,
+  template_id INTEGER NOT NULL DEFAULT 0, -- 0 = اللوحة الافتراضية
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS faq_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  category_ids TEXT NOT NULL DEFAULT '[]', -- JSON: التصنيفات التي تظهر في هذا القالب
+  color INTEGER NOT NULL DEFAULT 5793266,
+  created_by TEXT NOT NULL,
+  updated_by TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS faq_template_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id INTEGER NOT NULL,
+  version INTEGER NOT NULL,
+  action TEXT NOT NULL, -- create | edit | delete
+  name TEXT,
+  title TEXT,
+  description TEXT,
+  category_ids TEXT,
+  color INTEGER,
+  changed_by TEXT NOT NULL,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_faq_template_history ON faq_template_history(template_id, version);
 
 CREATE TABLE IF NOT EXISTS promotion_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,6 +280,10 @@ function migrate(database) {
   for (const [name, definition] of additions) {
     if (!columns.has(name)) database.exec(`ALTER TABLE ticket_metrics ADD COLUMN ${name} ${definition}`);
   }
+
+  const panelColumns = new Set(database.prepare('PRAGMA table_info(faq_panels)').all().map(c => c.name));
+  if (!panelColumns.has('template_id')) database.exec('ALTER TABLE faq_panels ADD COLUMN template_id INTEGER NOT NULL DEFAULT 0');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_faq_panels_template ON faq_panels(template_id)');
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_source_message ON ticket_metrics(source_message_id) WHERE source_message_id IS NOT NULL');
 }
 
