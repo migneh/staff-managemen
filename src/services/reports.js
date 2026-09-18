@@ -4,6 +4,7 @@ const staffService = require('./staff');
 const score = require('./score');
 const points = require('./points');
 const { hoursSince } = require('../utils');
+const clock = require('../clock');
 const { LEVELS, INACTIVE_STATUSES } = require('../constants');
 const { rankInfo } = require('./permissions');
 const logger = require('../logger').log('reports');
@@ -27,6 +28,31 @@ function individual(staff, days = 30) {
 function team(teamKey, days = 30) {
   const members = staffService.all({ team: teamKey });
   return members.map(m => individual(m, days));
+}
+
+/** ملخص قصير للوحة /me: اتجاه الأسبوع وسلسلة الأسابيع النشطة. */
+function personalTrend(staff) {
+  const currentRaw = score.monthlyRaw(staff.user_id, 7);
+  const previousRaw = score.monthlyRaw(staff.user_id, 7, 7);
+  const currentScore = score.compute(staff, currentRaw).score;
+  const previousScore = score.compute(staff, previousRaw).score;
+  const db = getDb();
+  let streak = 0;
+  for (let week = 0; week < 12; week++) {
+    const end = clock.addDays(clock.today(), -(week * 7));
+    const start = clock.addDays(end, -6);
+    const active = db.prepare(`SELECT 1 FROM activity_logs WHERE user_id = ? AND day BETWEEN ? AND ? LIMIT 1`).get(staff.user_id, start, end);
+    if (!active) break;
+    streak += 1;
+  }
+  return {
+    currentScore,
+    previousScore,
+    scoreDelta: currentScore - previousScore,
+    currentActiveDays: currentRaw.activeDays,
+    previousActiveDays: previousRaw.activeDays,
+    streakWeeks: streak,
+  };
 }
 
 /**
@@ -103,4 +129,4 @@ function lastSaved(type, period) {
   return r ? JSON.parse(r.data) : null;
 }
 
-module.exports = { individual, team, leaderboard, bestOfMonth, daily, save, lastSaved, LEADERBOARD_MIN_ACTIVE_DAYS, BEST_OF_MONTH_MIN_SCORE, BEST_OF_MONTH_MIN_WORK };
+module.exports = { individual, team, personalTrend, leaderboard, bestOfMonth, daily, save, lastSaved, LEADERBOARD_MIN_ACTIVE_DAYS, BEST_OF_MONTH_MIN_SCORE, BEST_OF_MONTH_MIN_WORK };

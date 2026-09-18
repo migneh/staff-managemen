@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const { getDb } = require('./database');
 const staffService = require('./services/staff');
 const reports = require('./services/reports');
+const load = require('./services/load');
 const points = require('./services/points');
 const score = require('./services/score');
 const { ABSENCE, LEAVE_GLOBAL } = require('./constants');
@@ -265,6 +266,19 @@ async function weeklyReport(client) {
     embeds.push(reportCmds.leaderboardEmbed(lb, `🏆 ترتيب ${t === 'support' ? 'فريق الدعم الفني' : 'فريق الإشراف'} (آخر ${windowDays} يوم)`, windowDays));
   }
   await sendToChannel(client, 'performance-reports', { embeds });
+
+  // ===== فحص عدالة الحمل: تنبيه الإدارة فقط، بلا خصم أو عقوبة تلقائية =====
+  const fairnessWarnings = [];
+  for (const t of ['support', 'moderation']) {
+    const teamLoad = load.teamLoad(t, 7);
+    const fairness = load.fairness(teamLoad);
+    if (fairness.imbalance >= 2 || fairness.idle.length) {
+      fairnessWarnings.push(`${t === 'support' ? 'الدعم الفني' : 'الإشراف'}: ${fairness.busiest ? `<@${fairness.busiest}> يحمل أعلى عبء` : 'لا يوجد'}${fairness.idle.length ? ` • بلا عمل: ${fairness.idle.map(id => `<@${id}>`).join(' ')}` : ''}`);
+    }
+  }
+  if (fairnessWarnings.length) {
+    await sendToChannel(client, 'staff-alerts', { embeds: [embed('⚖️ فحص عدالة الحمل الأسبوعي', `${fairnessWarnings.join('\n')}\n\nراجعوا **/team-load** قبل توزيع المناوبات أو المهام.`, COLORS.warning)] });
+  }
 
   // ===== قائمة مراجعة بشرية بدل الخصم =====
   if (below.length) {

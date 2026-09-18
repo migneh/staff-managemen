@@ -26,17 +26,23 @@ function get(id) {
 }
 
 function list(userId, { includeCompleted = false, limit = 20 } = {}) {
-  return getDb().prepare(`SELECT * FROM staff_tasks WHERE user_id = ? ${includeCompleted ? '' : "AND status = 'pending'"}
+  return getDb().prepare(`SELECT * FROM staff_tasks WHERE user_id = ? AND task_type != 'points_appeal' ${includeCompleted ? '' : "AND status = 'pending'"}
     ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, COALESCE(due_date, '9999-12-31'), id DESC LIMIT ?`).all(userId, limit);
 }
 
 function pendingCount(userId) {
-  return getDb().prepare("SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND status = 'pending'").get(userId).c;
+  return getDb().prepare("SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND status = 'pending' AND task_type != 'points_appeal'").get(userId).c;
+}
+
+function listByType(taskType, { includeCompleted = false, limit = 50 } = {}) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  return getDb().prepare(`SELECT * FROM staff_tasks WHERE task_type = ? ${includeCompleted ? '' : "AND status = 'pending'"}
+    ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?`).all(taskType, safeLimit);
 }
 
 function complete(id, userId) {
   const db = getDb();
-  const task = db.prepare("SELECT * FROM staff_tasks WHERE id = ? AND user_id = ? AND status = 'pending'").get(Number(id), userId);
+  const task = db.prepare("SELECT * FROM staff_tasks WHERE id = ? AND user_id = ? AND status = 'pending' AND task_type != 'points_appeal'").get(Number(id), userId);
   if (!task) return null;
   db.prepare("UPDATE staff_tasks SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?")
     .run(nowIso(), nowIso(), task.id);
@@ -54,4 +60,4 @@ function cancel(id, actorId = null) {
   return res.changes > 0;
 }
 
-module.exports = { ensureOnboarding, create, get, list, pendingCount, complete, cancel };
+module.exports = { ensureOnboarding, create, get, list, listByType, pendingCount, complete, cancel };

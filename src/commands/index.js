@@ -129,6 +129,8 @@ const COMPONENT_ACCESS = {
   'me:perf': { level: LEVELS.STAFF, owner: 'self' },
   'me:record': { level: LEVELS.STAFF, owner: 'self' },
   'me:promo': { level: LEVELS.STAFF, owner: 'self' },
+  'points:contest': { level: LEVELS.STAFF, owner: 'self' },
+  'points:contestmodal': { level: LEVELS.STAFF, owner: 'self' },
   'help:open': { level: LEVELS.STAFF },
   'help:section': { level: LEVELS.STAFF },
 };

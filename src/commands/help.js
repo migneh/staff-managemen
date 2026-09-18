@@ -90,9 +90,14 @@ function dashboard(i) {
   const pendingTasks = taskService.pendingCount(i.user.id);
   const cd = points.activeCooldown(i.user.id);
   const h = hoursSince(s.last_activity);
+  const trend = reports.personalTrend(s);
+  const blocker = ev.checks.find(c => !c.pass);
 
   const statusIcon = { active: '🟢', inactive: '🟠', on_leave: '🏖️', probation: '🧪', suspended: '⛔', resigned: '⚫' }[s.status];
   const tasks = [];
+  if (blocker) tasks.push(`🎯 **الخطوة الأهم للترقية:** ${blocker.label} — ${blocker.actual} → ${blocker.required}`);
+  if (trend.streakWeeks) tasks.push(`🔥 سلسلة نشاط: **${trend.streakWeeks}** أسبوع متواصل`);
+  tasks.push(`📈 هذا الأسبوع: Score **${trend.currentScore}** (${trend.scoreDelta >= 0 ? '+' : ''}${trend.scoreDelta} عن السابق) • نشاط ${trend.currentActiveDays}/${trend.previousActiveDays} يوم`);
   if (unread) tasks.push(`📌 **${unread}** مدخل مهم لم تقرأه — \`/faq\` ← «غير المقروءة»`);
   if (h > 48 && s.status !== 'on_leave') tasks.push(`⏰ آخر نشاط منذ **${Math.floor(h)}** ساعة — التنبيه عند 72`);
   if (pendingLeave) tasks.push(`🏖️ طلب إجازة #${pendingLeave.id} بانتظار المراجعة`);
@@ -112,7 +117,7 @@ function dashboard(i) {
     const passed = ev.checks.filter(c => c.pass).length;
     e.addFields({ name: `📈 الترقية القادمة: ${ev.rule.to}`, value: `${progressBar(passed, ev.checks.length, 12)} **${passed}/${ev.checks.length}** شرط\n${ev.checks.filter(c => !c.pass).slice(0, 3).map(c => `❌ ${c.label}: ${c.actual} → ${c.required}`).join('\n') || '✅ كل الشروط مكتملة'}` });
   }
-  e.addFields({ name: `📋 مهامك (${tasks.length})`, value: tasks.length ? tasks.join('\n') : '✨ لا شيء معلّق — استمر!' });
+  e.addFields({ name: '📋 ما التالي؟', value: tasks.length ? tasks.join('\n') : '✨ لا شيء معلّق — استمر!' });
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('me:perf').setLabel('التقرير الكامل').setEmoji('📊').setStyle(ButtonStyle.Primary),

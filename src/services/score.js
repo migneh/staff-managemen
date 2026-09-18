@@ -41,23 +41,40 @@ function ratingDetail(value) {
  * الوزن المعلن في /setup (تكتات 50% • إدارة 25% • إشراف 25% • عام 10%) لم يكن
  * يُقرأ أبداً في Score — الرسالة في أي قناة كانت تساوي 1. الآن صار للوزن أثر حقيقي.
  */
-function weightedMessages(userId, since) {
+function weightedMessages(userId, since, until = null) {
+  const end = until ? ' AND created_at < datetime(\'now\', ?)' : '';
+  const params = until ? [userId, since, until] : [userId, since];
   return getDb().prepare(`SELECT COALESCE(SUM(weight), 0) w FROM activity_logs
-    WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since).w;
+    WHERE user_id = ? AND created_at >= datetime('now', ?)` + end).get(...params).w;
 }
 
 /** بيانات الشهر الخام لإداري */
-function monthlyRaw(userId, days = 30) {
+function monthlyRaw(userId, days = 30, offsetDays = 0) {
   const db = getDb();
-  const since = `-${days} days`;
-  const act = db.prepare(`SELECT COUNT(*) msgs, COUNT(DISTINCT day) days FROM activity_logs WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
-  act.weighted = weightedMessages(userId, since);
-  const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, AVG(duration) d, SUM(reopened) reopened FROM ticket_metrics WHERE claimer = ? AND closed_at >= datetime('now', ?)`).get(userId, since);
-  const m = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE moderator_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
-  const w = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
-  const n = db.prepare(`SELECT SUM(note_type='positive') pos, SUM(note_type='negative') neg FROM staff_notes WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
-  const lv = db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now'))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
-    FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?)`).get(since, userId, since);
+  const span = Math.max(1, Math.trunc(Number(days) || 30));
+  const offset = Math.max(0, Math.trunc(Number(offsetDays) || 0));
+  const since = `-${span + offset} days`;
+  const until = offset ? `-${offset} days` : null;
+  const timeRange = (column) => until
+    ? ` AND ${column} < datetime('now', ?)`
+    : '';
+  const timeArgs = (extra = []) => until ? [...extra, until] : extra;
+  const act = db.prepare(`SELECT COUNT(*) msgs, COUNT(DISTINCT day) days FROM activity_logs WHERE user_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
+    .get(...timeArgs([userId, since]));
+  act.weighted = weightedMessages(userId, since, until);
+  const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, AVG(duration) d, SUM(reopened) reopened FROM ticket_metrics WHERE claimer = ? AND closed_at >= datetime('now', ?)` + timeRange('closed_at'))
+    .get(...timeArgs([userId, since]));
+  const m = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE moderator_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
+    .get(...timeArgs([userId, since]));
+  const w = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
+    .get(...timeArgs([userId, since]));
+  const n = db.prepare(`SELECT SUM(note_type='positive') pos, SUM(note_type='negative') neg FROM staff_notes WHERE user_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
+    .get(...timeArgs([userId, since]));
+  const lv = until
+    ? db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now', ?))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
+      FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?) AND start_date < date('now', ?)`).get(until, since, userId, since, until)
+    : db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now'))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
+      FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?)`).get(since, userId, since);
   return {
     messages: act.msgs, weightedMessages: Math.round((act.weighted || 0) * 100) / 100, activeDays: act.days,
     tickets: t.c, avgRating: t.r != null ? Math.round(t.r * 100) / 100 : null, avgDuration: t.d != null ? Math.round(t.d) : null, reopened: t.reopened || 0,
