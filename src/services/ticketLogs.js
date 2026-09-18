@@ -1,5 +1,6 @@
 'use strict';
 const { getDb } = require('../database');
+const logger = require('../logger').log('ticket-logs');
 const settings = require('./settings');
 const staffService = require('./staff');
 const points = require('./points');
@@ -57,6 +58,32 @@ function ticketIdFrom(parts) {
   return find(preferred) || find(parts.join('\n')) || parts.join('\n').match(/#([A-Za-z][\w-]*-\d+)/i)?.[1] || null;
 }
 
+/**
+ * يحوّل «مدة الحل» إلى دقائق. البوت الخارجي يرسلها بعدة أشكال:
+ *   «01:23» (ساعة:دقيقة) • «00:07:30» (س:د:ث) • «45 دقيقة» • «2 ساعات» • «1 يوم» • «45» (دقائق).
+ */
+function parseDuration(value) {
+  if (value == null || value === '') return null;
+  const text = decodeHtml(String(value)).replace(/[٠-٩]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660));
+  // HH:MM أو HH:MM:SS
+  const clock = text.match(/\b(\d{1,2}):([0-5]\d)(?::([0-5]\d))?\b/);
+  if (clock) {
+    const h = Number(clock[1]), m = Number(clock[2]), sec = Number(clock[3] || 0);
+    const total = h * 60 + m + Math.round(sec / 60);
+    return total > 0 ? total : 0;
+  }
+  // وحدات صريحة: يوم/ساعة/دقيقة
+  const unit = text.match(/(\d+(?:\.\d+)?)\s*(يوم|أيام|ايام|يومين|ساعة|ساعات|ساعتين|ساعه|دقيقة|دقائق|دقيقتين|دقيقه)/);
+  if (unit) {
+    const n = Number(unit[1]);
+    const u = unit[2];
+    const minutes = /يوم|أيام|ايام/.test(u) ? n * 1440 : /ساع/.test(u) ? n * 60 : n;
+    return Math.round(minutes);
+  }
+  const bare = text.match(/(\d+(?:\.\d+)?)/);
+  return bare ? Math.round(Number(bare[1])) : null;
+}
+
 function linkFrom(parts) {
   const text = parts.join('\n');
   const match = text.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/i);
@@ -83,16 +110,44 @@ function parseExternalTicketMessage(message) {
   const durationValue = valueAfterLabel(parts, ['مدة\\s+الحل', 'المدة', 'مدة']);
   const ratingMatch = ratingValue?.match(/[1-5]/);
   const rating = ratingMatch ? Number(ratingMatch[0]) : null;
-  const durationMatch = durationValue?.match(/\d+(?:\.\d+)?/);
-  const duration = durationMatch ? Number(durationMatch[0]) : null;
+  const duration = parseDuration(durationValue);
   if (!ticketId || !ID_RE.test(owner || '') || !ID_RE.test(claimer || '') || !ID_RE.test(closer || '')) return null;
 
   return {
     ticketId: ticketId.trim(), owner, claimer, closer, rating, duration,
+    durationSource: duration == null ? null : 'reported',
     source: 'external_log', sourceMessageId: message.id,
     sourceChannelId: message.channel.id, sourceUrl: message.url || null,
     ticketUrl: linkFrom(parts), loggedBy: message.author.id,
   };
+}
+
+/**
+ * إن لم يذكر البوت المدة، نحسبها من فرق الوقت بين أول رسالة تشير إلى التكت
+ * (رسالة الاستلام) ورسالة الإغلاق. لا API خارجي، فقط تاريخ القناة نفسها.
+ * النتيجة بالدقائق وتُوسم durationSource='computed'.
+ */
+async function enrichDuration(message, parsed) {
+  if (!parsed || parsed.duration != null) return parsed;
+  const key = parsed.ticketUrl || parsed.ticketId;
+  if (!key || !message.channel?.messages?.fetch) return parsed;
+  try {
+    const before = await message.channel.messages.fetch({ limit: 50, before: message.id });
+    const match = [...before.values()]
+      .filter(m => m.id !== message.id)
+      .find(m => {
+        const text = [m.content, ...(m.embeds || []).flatMap(e => [e.title, e.description, e.url, ...(e.fields || []).map(f => `${f.name} ${f.value}`)])].join(' ');
+        return text.includes(parsed.ticketId) || (parsed.ticketUrl && text.includes(parsed.ticketUrl));
+      });
+    if (!match?.createdTimestamp) return parsed;
+    const minutes = Math.max(0, Math.round((message.createdTimestamp - match.createdTimestamp) / 60000));
+    parsed.duration = minutes;
+    parsed.durationSource = 'computed';
+    parsed.claimedAt = new Date(match.createdTimestamp).toISOString().replace('T', ' ').slice(0, 19);
+  } catch (e) {
+    logger.warn(`تعذّر حساب مدة التكت ${parsed.ticketId}: ${e.message}`);
+  }
+  return parsed;
 }
 
 function addPoints(ticket, existing) {
@@ -123,12 +178,14 @@ function recordTicket(input) {
   const existing = db.prepare('SELECT * FROM ticket_metrics WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticket.ticketId);
   const reopened = existing ? 1 : 0;
   const result = db.prepare(`INSERT INTO ticket_metrics
-    (ticket_id, ticket_owner, claimer, closer, rating, duration, logged_by, reopened, source, source_message_id, source_channel_id, source_url, ticket_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(ticket.ticketId, ticket.owner, ticket.claimer, ticket.closer || ticket.claimer, ticket.rating, ticket.duration, ticket.loggedBy,
+    (ticket_id, ticket_owner, claimer, closer, rating, duration, duration_source, claimed_at, logged_by, reopened, source, source_message_id, source_channel_id, source_url, ticket_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(ticket.ticketId, ticket.owner, ticket.claimer, ticket.closer || ticket.claimer, ticket.rating, ticket.duration,
+      ticket.durationSource || (ticket.duration == null ? null : 'reported'), ticket.claimedAt || null, ticket.loggedBy,
       reopened, ticket.source, ticket.sourceMessageId || null, ticket.sourceChannelId || null, ticket.sourceUrl || null, ticket.ticketUrl || null);
   const earned = addPoints(ticket, existing);
   return { duplicate: false, row: { id: Number(result.lastInsertRowid), ...ticket, reopened }, earned, reopened: !!reopened, existing };
 }
 
-module.exports = { ID_RE, messageParts, valueAfterLabel, ticketIdFrom, userIdFrom, parseExternalTicketMessage, recordTicket };
+module.exports = {
+  parseDuration, enrichDuration, ID_RE, messageParts, valueAfterLabel, ticketIdFrom, userIdFrom, parseExternalTicketMessage, recordTicket };

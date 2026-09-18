@@ -18,10 +18,21 @@ function statusEmbed(staff, ev) {
     ev.eligible ? COLORS.success : COLORS.warning);
 }
 
+function neededFor(r) {
+  const s = staffService.get(r.user_id);
+  const rule = s ? promo.nextPromotion(s) : null;
+  return rule && rule.to === r.to_rank ? (rule.approvals || 1) : 1;
+}
+
 function requestEmbed(r, color) {
   const checks = JSON.parse(r.snapshot || '[]');
   const STATUS = { pending: '⏳ معلّق', approved: '✅ مقبول', rejected: '❌ مرفوض' };
-  return embed(`📈 طلب ترقية #${r.id}: ${r.from_rank} → ${r.to_rank}`, `👤 <@${r.user_id}>\n**الحالة:** ${STATUS[r.status]}\n\n${checksText(checks)}${r.note ? `\n\n**ملاحظة المتقدم:** ${r.note}` : ''}${r.reviewed_by ? `\n\n**المراجع:** <@${r.reviewed_by}>${r.review_reason ? ` — ${r.review_reason}` : ''}` : ''}`, color || COLORS.info);
+  const needed = neededFor(r);
+  const votes = r.status === 'pending' && needed > 1 ? promo.approvalsList(r.id) : [];
+  const quorum = needed > 1 && r.status === 'pending'
+    ? `\n\n**الموافقات:** ${votes.length}/${needed}${votes.length ? ` — ${votes.map(a => `<@${a.user_id}>`).join(' ')}` : ''}`
+    : '';
+  return embed(`📈 طلب ترقية #${r.id}: ${r.from_rank} → ${r.to_rank}`, `👤 <@${r.user_id}>\n**الحالة:** ${STATUS[r.status]}${quorum}\n\n${checksText(checks)}${r.note ? `\n\n**ملاحظة المتقدم:** ${r.note}` : ''}${r.reviewed_by ? `\n\n**المراجع:** <@${r.reviewed_by}>${r.review_reason ? ` — ${r.review_reason}` : ''}` : ''}`, color || COLORS.info);
 }
 
 const reviewRow = (id) => new ActionRowBuilder().addComponents(
@@ -106,10 +117,21 @@ module.exports = {
       if (i.staffLevel < rule.approvalLevel) return replyEphemeral(i, `❌ هذه الترقية تتطلب موافقة: ${rule.approvers}.`, COLORS.danger);
       if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك ترقية نفسك.', COLORS.danger);
 
+      // ===== نصاب الموافقات: الترقيات المعلنة بـ «Admin + Head» تحتاج موافقتين فعلاً =====
+      const needed = rule.approvals || 1;
+      const { recorded, count } = promo.recordApproval(r.id, i.user.id);
+      if (!recorded) return replyEphemeral(i, `ℹ️ سجّلت موافقتك مسبقاً على الطلب #${r.id} (${count}/${needed}).`, COLORS.info);
+      if (count < needed) {
+        audit.record({ action: 'promotion_approval_recorded', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, count, needed }, channelId: i.channelId });
+        const fresh = promo.getRequest(r.id);
+        if (i.message) await i.message.edit({ embeds: [requestEmbed(fresh)], components: [reviewRow(r.id)] }).catch(() => {});
+        return replyEphemeral(i, `✅ سُجّلت موافقتك (${count}/${needed}).\nبانتظار ${needed - count} موافقة إضافية من: ${rule.approvers}.`, COLORS.success);
+      }
+
       promo.review(r.id, 'approved', i.user.id, null);
-      audit.record({ action: 'promotion_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, from: rule.from, to: rule.to }, channelId: i.channelId });
-      staffService.setRank(r.user_id, s.team, rule.to);
-      points.resetForNewRank(r.user_id, `ترقية إلى ${rule.to}`);
+      audit.record({ action: 'promotion_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, from: rule.from, to: rule.to, approvals: count, needed }, channelId: i.channelId });
+      staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote' });
+      points.resetForNewRank(r.user_id); // عصر نقاط جديد بدل صف سلبي مزيف
       const until = points.setCooldown(r.user_id, 'promoted');
       const member = await i.guild.members.fetch(r.user_id).catch(() => null);
       const rolesOk = member ? await staffService.applyRankRoles(member, s.team, rule.to) : false;

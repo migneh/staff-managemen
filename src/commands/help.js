@@ -9,7 +9,7 @@ const faq = require('../services/faq');
 const points = require('../services/points');
 const taskService = require('../services/tasks');
 const { getDb } = require('../database');
-const { embed, userEmbed, COLORS, progressBar, scoreColor, scoreEmoji, hoursSince, divider, replyEphemeral } = require('../utils');
+const { embed, userEmbed, COLORS, progressBar, scoreColor, scoreEmoji, hoursSince, replyEphemeral } = require('../utils');
 
 const SECTIONS = [
   { id: 'start', emoji: '🚀', label: 'ابدأ من هنا', desc: 'أهم 5 أوامر تحتاجها يومياً' },

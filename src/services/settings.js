@@ -5,9 +5,26 @@
  */
 const { getDb } = require('../database');
 const fileConfig = require('../config');
-const { SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, LEAVE_GLOBAL, LEAVE_RULES, RESIGNATION_GLOBAL, VACATION_ROLE_TIMING } = require('../constants');
+const logger = require('../logger').log('settings');
+const {
+  SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, LEAVE_GLOBAL, LEAVE_RULES, RESIGNATION_GLOBAL, VACATION_ROLE_TIMING,
+  CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS, CHANNEL_META,
+} = require('../constants');
 
 let cache = null;
+
+/**
+ * قراءة آمنة لقيم settings: صف تالف واحد يجب ألا يُسقط البوت كله.
+ * القيمة غير الصالحة تُتجاهل وتُسجَّل، ويستمر كل ما عداها.
+ */
+function safeParse(key, value) {
+  try {
+    return { ok: true, value: JSON.parse(value) };
+  } catch (e) {
+    logger.error(`قيمة تالفة في الإعدادات — تم تجاهل "${key}": ${e.message}`);
+    return { ok: false };
+  }
+}
 
 function ensureTable() {
   getDb().exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')))`);
@@ -17,7 +34,11 @@ function load() {
   if (cache) return cache;
   ensureTable();
   const rows = getDb().prepare('SELECT key, value FROM settings').all();
-  const kv = Object.fromEntries(rows.map(r => [r.key, JSON.parse(r.value)]));
+  const kv = {};
+  for (const row of rows) {
+    const parsed = safeParse(row.key, row.value);
+    if (parsed.ok) kv[row.key] = parsed.value;
+  }
   const fileRoles = fileConfig.roles || {};
   cache = {
     policies: Object.fromEntries(Object.entries(kv).filter(([k]) => k.startsWith('policy.')).map(([k, v]) => [k.slice(7), v])),
@@ -125,13 +146,12 @@ function status() {
   for (const r of MOD_RANKS) if (!s.roles.moderation[r.name]) missingRoles.push({ team: 'moderation', rank: r.name });
   for (const r of GENERAL_MANAGEMENT_RANKS) if (!s.roles.general_management[r.name]) missingRoles.push({ team: 'general_management', rank: r.name });
   // قناة سجل التكتات الخارجية اختيارية، لأنها قناة يملكها/ينشئها بوت آخر.
-  const CHANNELS = ['staff-faq', 'staff-updates', 'leave-requests', 'resignation-requests', 'staff-logs', 'performance-reports', 'staff-alerts', 'ticket-logs', 'mod-logs', 'manager-review'];
-  const missingChannels = CHANNELS.filter(c => !s.channels[c]);
+  const missingChannels = CHANNEL_KEYS.filter(c => !s.channels[c]);
   const rolesDone = SUPPORT_RANKS.length + MOD_RANKS.length + GENERAL_MANAGEMENT_RANKS.length - missingRoles.length;
   return {
     missingRoles, missingChannels,
     rolesDone, rolesTotal: SUPPORT_RANKS.length + MOD_RANKS.length + GENERAL_MANAGEMENT_RANKS.length,
-    channelsDone: CHANNELS.length - missingChannels.length, channelsTotal: CHANNELS.length,
+    channelsDone: CHANNEL_KEYS.length - missingChannels.length, channelsTotal: CHANNEL_KEYS.length,
     activity: s.activityChannels,
     ticketSourceConfigured: !!s.channels['ticket-source-logs'],
     ticketLogBotId: s.ticketLogBotId,
@@ -144,12 +164,9 @@ function status() {
   };
 }
 
-const CHANNEL_KEYS = ['staff-faq', 'staff-updates', 'leave-requests', 'resignation-requests', 'staff-logs', 'performance-reports', 'staff-alerts', 'ticket-logs', 'mod-logs', 'manager-review'];
-const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs'];
-
 module.exports = {
   load, set, setRole, setGovernanceRole, setChannel, setActivity, setTicketLogBotId,
   roles, channels, activityChannels, roleId, channelId, ticketLogBotId, governanceRoleId, vacationRoleId, status,
   policy, setPolicy, resetPolicy, leavePolicy, resignationPolicy, VACATION_ROLE_TIMING,
-  CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS,
+  CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS, CHANNEL_META,
 };

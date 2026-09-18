@@ -8,7 +8,7 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ComponentType,
 } = require('discord.js');
 
-const AR_DIGITS = (n) => String(n);
+const { arDigits: AR_DIGITS } = require('../utils');
 
 /** `<t:1700000000:D>` — تاريخ محلي في جهاز القارئ */
 function tsDate(value, style = 'D') {

@@ -78,7 +78,9 @@ async function decide(i, id, status) {
   let dmEmbed;
   if (status === 'accepted') {
     color = COLORS.success;
+    const before = staffService.get(r.user_id);
     staffService.setStatus(r.user_id, 'resigned');
+    if (before) staffService.recordRankChange(r.user_id, { fromRank: before.rank, toRank: before.rank, team: before.team, changeType: 'remove', reason: `قبول استقالة${reason ? ` — ${reason}` : ''}`, actorId: i.user.id });
     const removeAt = r.remove_roles_at;
     const shouldRemoveNow = !removeAt || removeAt <= today();
     db.prepare(`UPDATE leave_requests SET status = 'cancelled', cancelled_by = ?, cancelled_at = datetime('now'), cancel_reason = 'إلغاء تلقائي بسبب قبول الاستقالة', end_reason='resignation' WHERE user_id = ? AND status IN ('pending', 'approved')`).run(i.user.id, r.user_id);
@@ -314,7 +316,7 @@ module.exports = {
       confirm.addFields({ name: '📋 تذكير بالتسليم', value: RESIGNATION_GLOBAL.handoverTasks.slice(0, 3).join('\n') });
       return i.reply({ embeds: [confirm, handoverEmbed()], ephemeral: true });
     },
-    'resign:pickwithdraw': async (i, [page]) => {
+    'resign:pickwithdraw': async (i, [_page]) => {
       const id = Number(i.values[0]);
       const r = getDb().prepare("SELECT * FROM resignations WHERE id=? AND user_id=? AND status IN ('pending','on_hold')").get(id, i.user.id);
       if (!r) return replyEphemeral(i, '❌ لا يمكن سحب هذا الطلب.', COLORS.danger);

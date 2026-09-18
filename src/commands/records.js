@@ -1,6 +1,6 @@
 'use strict';
 const { SlashCommandBuilder } = require('discord.js');
-const { LEVELS, NOTE_TYPES, WARNING_TYPES, COOLDOWNS, TEAMS } = require('../constants');
+const { LEVELS, NOTE_TYPES, WARNING_TYPES, COOLDOWNS, TEAMS, STATUS } = require('../constants');
 const { getDb } = require('../database');
 const points = require('../services/points');
 const staffService = require('../services/staff');
@@ -12,8 +12,25 @@ function recordEmbed(userId, { includeSecret }) {
   const notes = db.prepare(`SELECT * FROM staff_notes WHERE user_id = ? ${includeSecret ? '' : 'AND is_secret = 0'} ORDER BY id DESC LIMIT 10`).all(userId);
   const warns = db.prepare('SELECT * FROM warnings WHERE user_id = ? ORDER BY id DESC LIMIT 10').all(userId);
   const s = staffService.get(userId);
-  const e = embed(`📁 سجل <@${userId}>`.replace('<@', '').replace('>', ''), null, COLORS.info)
+  const e = embed(`📁 سجل الإداري ${userId}`, null, COLORS.info)
     .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
+  // ===== تاريخ الرتب: من رقّى مَن ومتى (ROADMAP 2.1) =====
+  const RANK_CHANGE = {
+    promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين',
+    remove: '🚪 إزالة', left_guild: '👋 مغادرة السيرفر',
+  };
+  const rankRows = staffService.rankHistory(userId, 5);
+  if (rankRows.length) {
+    e.addFields({
+      name: '📜 تاريخ الرتب',
+      value: rankRows.map(r => {
+        const to = r.change_type === 'remove' || r.change_type === 'left_guild' ? r.from_rank : r.to_rank;
+        const from = r.from_rank && r.from_rank !== to ? `${r.from_rank} → ` : '';
+        const who = r.actor_id ? ` • <@${r.actor_id}>` : '';
+        return `${RANK_CHANGE[r.change_type] || r.change_type}: ${from}**${to || '—'}** • ${discordTs(r.created_at, 'd')}${who}`;
+      }).join('\n').slice(0, 1024),
+    });
+  }
   e.addFields({
     name: `⚠️ الإنذارات (${warns.length})`,
     value: warns.length ? warns.map(w => `${WARNING_TYPES[w.warning_type]?.emoji} **${WARNING_TYPES[w.warning_type]?.label}** — ${w.reason} • ${discordTs(w.created_at, 'd')} • <@${w.issued_by}>`).join('\n').slice(0, 1024) : 'لا يوجد',
@@ -70,8 +87,12 @@ module.exports = {
         const pts = points.add(user.id, type === 'verbal' ? 'verbal_warning' : 'formal_warning', target.team, { refType: 'warning', refId: res.lastInsertRowid, addedBy: i.user.id });
         audit.record({ action: 'staff_warning_issued', actorId: i.user.id, targetId: user.id, details: { type, reason, rowId: res.lastInsertRowid }, channelId: i.channelId });
         let extra = '';
-        if (def.suspend) { staffService.setStatus(user.id, 'suspended'); const until = points.setCooldown(user.id, 'suspended', COOLDOWNS.suspended); extra = `\n⛔ تم إيقاف العضو + تجميد الترقية حتى ${until}`; }
-        else if (def.freezeDays) { const until = points.setCooldown(user.id, 'warning', def.freezeDays); extra = `\n🧊 تجميد الترقية حتى ${until}`; }
+        if (def.suspend) {
+          // إيقاف بتاريخ انتهاء واضح: 60 يوماً لتجميد الترقية، ثم رفع تلقائي للصلاحيات
+          const until = points.setCooldown(user.id, 'suspended', COOLDOWNS.suspended);
+          staffService.suspend(user.id, until);
+          extra = `\n⛔ تم الإيقاف + تجميد الترقية حتى ${until}\n↩️ يُرفع الإيقاف تلقائياً في ${until} (أو يدوياً بـ \`/unsuspend\`)`;
+        } else if (def.freezeDays) { const until = points.setCooldown(user.id, 'warning', def.freezeDays); extra = `\n🧊 تجميد الترقية حتى ${until}`; }
 
         await replyEphemeral(i, `${def.emoji} تم إصدار **${def.label}** على <@${user.id}> (${pts} نقطة).${extra}`, COLORS.warning);
         await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label}`, `**السبب:** ${reason}\n**النقاط:** ${pts}${extra}\n\nبواسطة: <@${i.user.id}>`, COLORS.danger)] });
@@ -91,6 +112,26 @@ module.exports = {
       data: new SlashCommandBuilder().setName('my-record').setDescription('عرض سجلك الشخصي'),
       level: LEVELS.STAFF,
       async execute(i) { return i.reply({ embeds: [recordEmbed(i.user.id, { includeSecret: false })], ephemeral: true }); },
+    },
+    {
+      data: new SlashCommandBuilder().setName('unsuspend').setDescription('رفع الإيقاف عن إداري قبل انتهاء مدته (Boss أو أعلى)')
+        .addUserOption(o => o.setName('user').setDescription('الإداري الموقوف').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('سبب رفع الإيقاف').setRequired(true).setMaxLength(300)),
+      level: LEVELS.BOSS,
+      async execute(i) {
+        const user = i.options.getUser('user');
+        const reason = i.options.getString('reason');
+        const target = staffService.get(user.id);
+        if (!target) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
+        if (target.status !== 'suspended') {
+          return replyEphemeral(i, `❌ <@${user.id}> ليس موقوفاً حالياً (الحالة: **${STATUS[target.status] || target.status}**).`, COLORS.danger);
+        }
+        staffService.unsuspend(user.id);
+        audit.record({ action: 'staff_unsuspended', actorId: i.user.id, targetId: user.id, details: { reason, wasUntil: target.suspended_until || null }, channelId: i.channelId });
+        await replyEphemeral(i, `✅ تم رفع الإيقاف عن <@${user.id}> وعاد إلى الحالة النشطة.\n_تبقى فترة تبريد الترقية كما هي حتى انتهائها._`, COLORS.success);
+        await dm(i.client, user.id, { embeds: [embed('✅ رُفع الإيقاف', `تمت إعادة تفعيل حسابك الإداري.\n**السبب:** ${reason}\n\nنعتذر عن أي إزعاج، ومرحباً بعودتك.`, COLORS.success)] });
+        return log(i.client, '↩️ رفع إيقاف', `<@${user.id}> بواسطة <@${i.user.id}>\n${reason}`, COLORS.success);
+      },
     },
   ],
   components: {},

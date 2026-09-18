@@ -22,11 +22,36 @@ function speedRatingPoints(avgMinutes, avgRating) {
   return 10;
 }
 
+/**
+ * تقييم المشرف اليدوي: إما غير مُقيَّم إطلاقاً (يُستثنى من المقام بدل منح
+ * نقاط مجانية بمجرد عدم التقييم)، أو محرّك صريح من 0 إلى max.
+ * أي أن "لم يُقيَّم" لم تعد تساوي "جيد".
+ */
+function ratingFactor(value, max, label) {
+  if (value == null) return { pts: 0, assessed: false, label: `${label}: لم يُقيَّم` };
+  return { pts: Math.max(0, Math.min(max, Number(value) || 0)), assessed: true, label: `${label}: ${value}/${max}` };
+}
+
+function ratingDetail(value) {
+  return value == null ? 'لم يُقيَّم بعد (يُستثنى من الحساب ولا يمنح نقاطاً)' : 'تقييم المشرف';
+}
+
+/**
+ * أوزان القنوات: تُطبَّق فعلياً على احتساب الرسائل.
+ * الوزن المعلن في /setup (تكتات 50% • إدارة 25% • إشراف 25% • عام 10%) لم يكن
+ * يُقرأ أبداً في Score — الرسالة في أي قناة كانت تساوي 1. الآن صار للوزن أثر حقيقي.
+ */
+function weightedMessages(userId, since) {
+  return getDb().prepare(`SELECT COALESCE(SUM(weight), 0) w FROM activity_logs
+    WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since).w;
+}
+
 /** بيانات الشهر الخام لإداري */
 function monthlyRaw(userId, days = 30) {
   const db = getDb();
   const since = `-${days} days`;
   const act = db.prepare(`SELECT COUNT(*) msgs, COUNT(DISTINCT day) days FROM activity_logs WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
+  act.weighted = weightedMessages(userId, since);
   const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, AVG(duration) d, SUM(reopened) reopened FROM ticket_metrics WHERE claimer = ? AND closed_at >= datetime('now', ?)`).get(userId, since);
   const m = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE moderator_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
   const w = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since);
@@ -34,7 +59,7 @@ function monthlyRaw(userId, days = 30) {
   const lv = db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now'))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
     FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?)`).get(since, userId, since);
   return {
-    messages: act.msgs, activeDays: act.days,
+    messages: act.msgs, weightedMessages: Math.round((act.weighted || 0) * 100) / 100, activeDays: act.days,
     tickets: t.c, avgRating: t.r != null ? Math.round(t.r * 100) / 100 : null, avgDuration: t.d != null ? Math.round(t.d) : null, reopened: t.reopened || 0,
     actions: m.c, warnings: w.c, positiveNotes: n.pos || 0, negativeNotes: n.neg || 0,
     leaveDays: Math.max(0, Math.round(lv.d || 0)),
@@ -50,30 +75,47 @@ function compute(staff, raw) {
     return { score: 100, factors: [{ name: 'نظام الإدارة العامة', pts: 100, max: 100, detail: 'خارج سلم Score والترقيات' }], raw: raw || monthlyRaw(staff.user_id) };
   }
   raw = raw || monthlyRaw(staff.user_id);
+  // الرسائل تُحتسب بوزن قنواتها (تكتات 50% / إدارة 25% / إشراف 25% / عام 10%).
+  // إن غاب الوزن (بيانات قديمة) نرجع لعدد الرسائل كما هو.
+  const msgPoints = raw.weightedMessages != null ? raw.weightedMessages : raw.messages;
+  const msgDetail = raw.weightedMessages != null
+    ? `${raw.messages} رسالة • وزن ${Math.round(msgPoints)}`
+    : `${raw.messages} رسالة`;
+
   const factors = [];
-  const push = (name, pts, max, detail) => factors.push({ name, pts, max, detail });
+  // العوامل المحسوبة (رسائل/تواجد/تكتات/مخالفات) مُقيَّمة دائماً؛ العوامل البشرية تمرّر حالتها
+  const push = (name, pts, max, detail, assessed = true) => factors.push({ name, pts, max, detail, assessed });
 
   if (staff.team === 'support') {
     const info = rankInfo('support', staff.rank);
     if (info && !info.handlesTickets) {
-      push('نشاط الشات', tier(raw.messages, CHAT_LADDER), 25, `${raw.messages} رسالة`);
+      push('نشاط الشات', tier(msgPoints, CHAT_LADDER), 25, msgDetail);
       push('التواجد', tier(raw.activeDays, PRESENCE_25), 25, `${raw.activeDays} يوم`);
-      push('التفاعل مع الفريق', staff.team_interaction ?? 10, 25, staff.team_interaction != null ? 'تقييم المشرف' : 'لم يُقيَّم بعد (افتراضي)');
-      push('تقييم المشرف', staff.supervisor_rating ?? 10, 25, staff.supervisor_rating != null ? 'تقييم المشرف' : 'لم يُقيَّم بعد (افتراضي)');
+      const interaction = ratingFactor(staff.team_interaction, 25, 'تفاعل الفريق');
+      push('التفاعل مع الفريق', interaction.pts, 25, ratingDetail(staff.team_interaction), interaction.assessed);
+      const supervisor = ratingFactor(staff.supervisor_rating, 25, 'تقييم المشرف');
+      push('تقييم المشرف', supervisor.pts, 25, ratingDetail(staff.supervisor_rating), supervisor.assessed);
     } else {
       push('التكتات المغلقة', tier(raw.tickets, TICKETS_LADDER), 30, `${raw.tickets} تكت`);
       push('سرعة الرد + التقييم', speedRatingPoints(raw.avgDuration, raw.avgRating), 25, `${raw.avgDuration ?? '—'} د / ${raw.avgRating ?? '—'} ⭐`);
-      push('نشاط الشات', tier(raw.messages, CHAT_LADDER), 25, `${raw.messages} رسالة`);
+      push('نشاط الشات', tier(msgPoints, CHAT_LADDER), 25, msgDetail);
       push('التواجد', tier(raw.activeDays, PRESENCE_20), 20, `${raw.activeDays} يوم`);
     }
   } else {
     push('المخالفات المعالجة', tier(raw.actions, ACTIONS_LADDER), 30, `${raw.actions} إجراء`);
-    push('سرعة الاستجابة', staff.response_speed ?? 10, 25, staff.response_speed != null ? 'تقييم المشرف' : 'لم يُقيَّم بعد (افتراضي)');
-    push('التواجد والنشاط', tier(raw.messages, CHAT_LADDER), 25, `${raw.messages} رسالة`);
+    const speed = ratingFactor(staff.response_speed, 25, 'سرعة الاستجابة');
+    push('سرعة الاستجابة', speed.pts, 25, ratingDetail(staff.response_speed), speed.assessed);
+    push('التواجد والنشاط', tier(msgPoints, CHAT_LADDER), 25, msgDetail);
     push('الالتزام', tier(raw.activeDays, PRESENCE_20), 20, `${raw.activeDays} يوم`);
   }
-  const score = Math.min(100, factors.reduce((s, f) => s + f.pts, 0));
-  return { score, factors, raw };
+  // عند غياب تقييم المشرف نُعيد توزيع وزنه بصدق بدل منح نقاط مجانية:
+  // المقياس يُحسب على «المُقيَّم فعلاً» ثم يُوحَّد إلى 100.
+  const assessedMax = factors.reduce((s, f) => s + (f.assessed ? f.max : 0), 0);
+  const rawPoints = factors.reduce((s, f) => s + f.pts, 0);
+  const score = factors.length && assessedMax === 0
+    ? Math.round(Math.min(100, rawPoints))
+    : Math.round(Math.min(100, (rawPoints / assessedMax) * 100));
+  return { score, factors, raw, assessedMax };
 }
 
 function grade(score) {
