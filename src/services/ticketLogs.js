@@ -176,6 +176,11 @@ function recordTicket(input) {
     if (duplicate) return { duplicate: true, row: duplicate, earned: 0, reopened: !!duplicate.reopened };
   }
   const existing = db.prepare('SELECT * FROM ticket_metrics WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticket.ticketId);
+  // الإدخال اليدوي خطة احتياطية وليست طريقة لتكرار النقاط. التكت المعاد فتحه
+  // يُقبل فقط من سجل خارجي جديد، حيث يملك source_message_id مرجعاً مستقلاً.
+  if (existing && ticket.source === 'manual') {
+    return { duplicate: true, manualDuplicate: true, row: existing, earned: 0, reopened: !!existing.reopened };
+  }
   const reopened = existing ? 1 : 0;
   const result = db.prepare(`INSERT INTO ticket_metrics
     (ticket_id, ticket_owner, claimer, closer, rating, duration, duration_source, claimed_at, logged_by, reopened, source, source_message_id, source_channel_id, source_url, ticket_url)

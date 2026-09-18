@@ -188,6 +188,22 @@ describe('صيانة البيانات (Phase 2)', () => {
   });
 });
 
+describe('دورة الاستقالة وإعادة التعيين', () => {
+  test('التفاعل العابر لا يعيد مفعول استقالة بإزالة رتب مؤجلة', () => {
+    const settings = require('../src/services/settings');
+    settings.setRole('support', 'Support', 'support-role');
+    seedStaff('resigned-user', 'support', 'Support', { status: 'resigned' });
+    const member = {
+      id: 'resigned-user',
+      user: { username: 'resigned-user' },
+      roles: { cache: new Map([['support-role', { id: 'support-role' }]]) },
+    };
+    assert.equal(staffService.ensure(member).status, 'resigned');
+    assert.equal(staffService.get('resigned-user').status, 'resigned');
+    assert.equal(staffService.ensure(member, { reinstate: true }).status, 'active');
+  });
+});
+
 describe('الإيقاف المؤقت', () => {
   test('يُرفع تلقائياً عند انتهاء المدة ويُبلّغ بالقائمة', () => {
     seedStaff('u1', 'support', 'Support');

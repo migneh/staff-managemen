@@ -298,7 +298,9 @@ async function monthlyReport(client) {
     const prev = reports.lastSaved('monthly', `${prevPeriod}:${t}`);
     const diff = prev ? avg - prev.avg : null;
     reports.save('monthly', `${period}:${t}`, { avg, members: rows.map(r => ({ user: r.staff.user_id, score: r.score })) });
-    const best = rows.filter(r => r.staff.rank !== 'Boss').sort((a, b) => b.score - a.score)[0];
+    // استخدم نفس بوابة «أفضل إداري» المعلنة في reports.js، لا مجرد أعلى Score.
+    // هذا يمنع منح +50 لعضو بلا عمل فعلي أو لعضو في إجازة/تجربة.
+    const best = reports.bestOfMonth(rows);
     if (best) points.add(best.staff.user_id, 'best_of_month', t, { refType: 'month', refId: period });
     embeds.push(embed(`🗓️ التقرير الشهري — ${t === 'support' ? 'الدعم الفني' : 'الإشراف'} (${period})`,
       `متوسط Score: **${avg}**${diff != null ? ` (${diff >= 0 ? '📈 +' : '📉 '}${diff} عن الشهر الماضي)` : ''}\n🏅 أفضل إداري: ${best ? `<@${best.staff.user_id}> (${best.score})` : '—'}\n` +

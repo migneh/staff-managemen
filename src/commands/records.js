@@ -16,7 +16,7 @@ function recordEmbed(userId, { includeSecret }) {
     .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
   // ===== تاريخ الرتب: من رقّى مَن ومتى (ROADMAP 2.1) =====
   const RANK_CHANGE = {
-    promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين',
+    promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين', reinstate: '↩️ إعادة تفعيل',
     remove: '🚪 إزالة', left_guild: '👋 مغادرة السيرفر',
   };
   const rankRows = staffService.rankHistory(userId, 5);

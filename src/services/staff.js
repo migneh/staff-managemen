@@ -21,11 +21,15 @@ function all({ team, includeResigned = false } = {}) {
  * تسجيل/مزامنة الإداري تلقائياً من رتب الديسكورد.
  * يُستدعى عند أول رسالة أو أي تفاعل.
  */
-function ensure(member) {
+function ensure(member, { reinstate = false } = {}) {
   const info = resolveStaff(member);
   if (!info) return null;
   const db = getDb();
   const existing = get(member.id);
+  // قبول الاستقالة يغيّر الحالة فوراً، وقد تكون إزالة الرتب مؤجلة. لا تُعد
+  // رسالة أو تفاعل عابر العضو إلى active؛ إعادة التعيين الصريحة فقط تستعمل
+  // reinstate: true (حالياً من manage-general).
+  if (existing?.status === 'resigned' && !reinstate) return existing;
   if (!existing) {
     const initialStatus = info.team === 'general_management' ? 'active' : 'probation';
     db.prepare(`INSERT INTO staff_members (user_id, username, team, rank, status, joined_at, rank_since)

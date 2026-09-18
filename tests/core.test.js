@@ -215,6 +215,15 @@ describe('دورة الإجازات والاستقالات', () => {
 });
 
 describe('التقارير والـ Leaderboard', () => {
+  test('جائزة الشهر لا تُمنح بلا عمل أو أثناء الإجازة', () => {
+    const rows = [
+      { staff: { user_id: 'idle', team: 'support', rank: 'Support', status: 'active' }, score: 95, raw: { tickets: 0 } },
+      { staff: { user_id: 'working', team: 'support', rank: 'Support', status: 'active' }, score: 80, raw: { tickets: 10 } },
+      { staff: { user_id: 'leave', team: 'support', rank: 'Support', status: 'on_leave' }, score: 100, raw: { tickets: 50 } },
+    ];
+    assert.equal(reports.bestOfMonth(rows).staff.user_id, 'working');
+  });
+
   test('يستبعد Boss والمجازين', () => {
     seedStaff('b', 'support', 'Boss');
     seedStaff('l', 'support', 'Support', { status: 'on_leave' });
@@ -311,6 +320,9 @@ describe('استيراد سجل التكتات الخارجي', () => {
     assert.equal(ticketLogs.parseDuration(''), null);
     const second = ticketLogs.recordTicket(parsed);
     assert.equal(second.duplicate, true);
+    const manualFallback = ticketLogs.recordTicket({ ...parsed, source: 'manual', sourceMessageId: null });
+    assert.equal(manualFallback.duplicate, true);
+    assert.equal(manualFallback.manualDuplicate, true);
     assert.equal(getDb().prepare('SELECT COUNT(*) c FROM ticket_metrics').get().c, 1);
   });
 });

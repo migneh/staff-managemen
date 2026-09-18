@@ -46,9 +46,16 @@ module.exports = {
           const removed = await staffService.removeAllStaffRoles(member);
           if (!removed) return replyEphemeral(i, '❌ لم أستطع إزالة الرتب الإدارية القديمة. تحقق من صلاحيات البوت.', COLORS.danger);
           try { await member.roles.add(roleId, `تعيين ${rank} عبر Staff Manager`); } catch (e) { return replyEphemeral(i, `❌ فشل إضافة الرتبة: ${e.message}`, COLORS.danger); }
-          const saved = staffService.ensure(member);
+          const saved = staffService.ensure(member, { reinstate: true });
           if (saved) staffService.update(user.id, { status: 'active' });
-          staffService.recordRankChange(user.id, { fromRank: existed?.rank || null, toRank: rank, team: 'general_management', changeType: existed ? 'reassign' : 'promote', reason, actorId: i.user.id });
+          staffService.recordRankChange(user.id, {
+            fromRank: existed?.rank || null,
+            toRank: rank,
+            team: 'general_management',
+            changeType: existed?.status === 'resigned' ? 'reinstate' : existed ? 'reassign' : 'promote',
+            reason,
+            actorId: i.user.id,
+          });
           audit.record({ action: 'general_management_assigned', actorId: i.user.id, targetId: user.id, details: { rank, reason }, channelId: i.channelId });
           await log(i.client, '🏛️ تعيين في الإدارة العامة', `<@${user.id}> أصبح **${rank}** بواسطة <@${i.user.id}>${reason ? `\nالسبب: ${reason}` : ''}`, COLORS.success);
           return i.reply({ embeds: [embed('✅ تم التعيين', `<@${user.id}> أصبح **${rank}** في **الإدارة العامة للسيرفر**.\n\nلا توجد ترقية تلقائية لهذه الرتبة؛ أي تغيير لاحق يحتاج قراراً من Server Manager أو General Manager الحالي.`, COLORS.success)], ephemeral: true });

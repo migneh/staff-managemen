@@ -191,9 +191,9 @@ module.exports = {
         const header = pendingEmbed(1);
         await i.reply({ embeds: header.embeds, ephemeral: true });
         for (const r of header.items) {
-              const covText = cov.peak >= cov.max ? `⚠️ ممتلئة ${kit.coverageBar(cov.peak, cov.max)}` : `${kit.coverageBar(cov.peak, cov.max)}`;
+          const cov = leaveService.coverageBetween(r.start_date, r.end_date);
+          const covText = cov.peak >= cov.max ? `⚠️ ممتلئة ${kit.coverageBar(cov.peak, cov.max)}` : `${kit.coverageBar(cov.peak, cov.max)}`;
           const e = leaveEmbed(r);
-      const cov = leaveService.coverageBetween(r.start_date, r.end_date);
           e.addFields({ name: '👥 التغطية', value: covText, inline: true });
           // زر إلغاء سريع للمعلق
           const row = reviewRow(r.id);

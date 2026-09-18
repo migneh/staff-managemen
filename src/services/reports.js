@@ -16,7 +16,7 @@ function individual(staff, days = 30) {
   const warns = db.prepare(`SELECT warning_type, COUNT(*) c FROM warnings WHERE user_id = ? AND created_at >= datetime('now', ?) GROUP BY warning_type`).all(staff.user_id, `-${days} days`);
   const absentDays = Math.max(0, days - raw.activeDays - raw.leaveDays);
   return {
-    staff, raw, score: sc.score, factors: sc.factors, grade: score.grade(sc.score),
+    staff, raw, score: sc.score, factors: sc.factors, assessedMax: sc.assessedMax, grade: score.grade(sc.score),
     points: points.total(staff.user_id),
     warnings: warns, absentDays,
     lastActivityHours: hoursSince(staff.last_activity),
@@ -61,11 +61,21 @@ const BEST_OF_MONTH_MIN_SCORE = 70;
 const BEST_OF_MONTH_MIN_WORK = 10;
 
 function bestOfMonth(rows) {
-  const eligible = rows.filter(r => r.staff.rank !== 'Boss' && r.score >= BEST_OF_MONTH_MIN_SCORE && r.primary >= BEST_OF_MONTH_MIN_WORK);
+  const withWork = rows.map(r => ({
+    ...r,
+    // تقارير الفريق لا تحتاج إلى أن يضيف المستدعي primary يدوياً؛ اشتقاقه هنا
+    // يمنع منح الجائزة لعضو بلا أي عنصر عمل فعلي.
+    primary: r.primary ?? (r.staff.team === 'support' ? r.raw.tickets : r.raw.actions),
+  }));
+  const eligible = withWork.filter(r => r.staff.rank !== 'Boss'
+    && !INACTIVE_STATUSES.includes(r.staff.status)
+    && r.staff.status !== 'probation'
+    && r.score >= BEST_OF_MONTH_MIN_SCORE
+    && r.primary >= BEST_OF_MONTH_MIN_WORK);
   if (rows.length && !eligible.length) {
     logger.warn(`لم يُمنح لقب أفضل إداري: لا أحد حقق الحد الأدنى (Score ${BEST_OF_MONTH_MIN_SCORE}+ و ${BEST_OF_MONTH_MIN_WORK} عنصر عمل)`);
   }
-  return eligible.sort((a, b) => b.score - a.score)[0] || null;
+  return eligible.sort((a, b) => b.score - a.score || b.primary - a.primary)[0] || null;
 }
 
 /** التقرير اليومي */
