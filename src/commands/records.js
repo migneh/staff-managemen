@@ -14,6 +14,23 @@ function recordEmbed(userId, { includeSecret }) {
   const s = staffService.get(userId);
   const e = embed(`📁 سجل الإداري ${userId}`, null, COLORS.info)
     .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
+  // ===== تاريخ الرتب: من رقّى مَن ومتى (ROADMAP 2.1) =====
+  const RANK_CHANGE = {
+    promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين',
+    remove: '🚪 إزالة', left_guild: '👋 مغادرة السيرفر',
+  };
+  const rankRows = staffService.rankHistory(userId, 5);
+  if (rankRows.length) {
+    e.addFields({
+      name: '📜 تاريخ الرتب',
+      value: rankRows.map(r => {
+        const to = r.change_type === 'remove' || r.change_type === 'left_guild' ? r.from_rank : r.to_rank;
+        const from = r.from_rank && r.from_rank !== to ? `${r.from_rank} → ` : '';
+        const who = r.actor_id ? ` • <@${r.actor_id}>` : '';
+        return `${RANK_CHANGE[r.change_type] || r.change_type}: ${from}**${to || '—'}** • ${discordTs(r.created_at, 'd')}${who}`;
+      }).join('\n').slice(0, 1024),
+    });
+  }
   e.addFields({
     name: `⚠️ الإنذارات (${warns.length})`,
     value: warns.length ? warns.map(w => `${WARNING_TYPES[w.warning_type]?.emoji} **${WARNING_TYPES[w.warning_type]?.label}** — ${w.reason} • ${discordTs(w.created_at, 'd')} • <@${w.issued_by}>`).join('\n').slice(0, 1024) : 'لا يوجد',

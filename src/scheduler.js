@@ -17,6 +17,7 @@ const clock = require('./clock');
 const { INACTIVE_STATUSES } = require('./constants');
 const logger = require('./logger').log('scheduler');
 const config = require('./config');
+const retention = require('./services/retention');
 
 const EXEMPT = INACTIVE_STATUSES;
 
@@ -195,6 +196,8 @@ async function processResignations(client) {
     const vacationRoleRemoved = await staffService.removeVacationRole(member);
     if (staffRolesRemoved && vacationRoleRemoved.ok) {
       db.prepare("UPDATE resignations SET roles_removed_at = datetime('now') WHERE id = ?").run(r.id);
+      const info = staffService.get(r.user_id);
+      if (info) staffService.recordRankChange(r.user_id, { fromRank: info.rank, toRank: info.rank, team: info.team, changeType: 'remove', reason: `إزالة رتب الاستقالة #${r.id}` });
       audit.record({ action: 'resignation_roles_removed_deferred', targetId: r.user_id, details: { requestId: r.id } });
     }
   }
@@ -378,6 +381,7 @@ function start(client) {
     ['daily-report', '0 9 * * *', () => dailyReport(client)],
     ['weekly-report', '0 10 * * 5', () => weeklyReport(client)],
     ['monthly-report', '0 11 1 * *', () => monthlyReport(client)],
+    ['maintenance', '0 3 1 * *', () => retention.run({ dryRun: false })],
   ];
   JOBS.length = 0;
   JOBS.push(...jobs.map(([name, expr]) => ({ name, expr, tz })));

@@ -25,6 +25,43 @@ CREATE TABLE IF NOT EXISTS staff_members (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- تاريخ الرتب: الترقيات والتنزيلات والإزالة — كانت الرتب تُكتب فوق نفسها فلا يمكن
+-- الإجابة على «من رقّى مَن ومتى؟» (راجع ROADMAP 2.1)
+CREATE TABLE IF NOT EXISTS staff_rank_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  team TEXT,
+  from_rank TEXT,
+  to_rank TEXT,
+  change_type TEXT NOT NULL,     -- promote | demote | reassign | remove | reinstate
+  reason TEXT,
+  actor_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_rank_history_user ON staff_rank_history(user_id, created_at);
+
+-- تجميع شهري للنشاط: يبقى بعد تقليم السجلات الخام (راجع ROADMAP 2.3)
+CREATE TABLE IF NOT EXISTS activity_monthly (
+  user_id TEXT NOT NULL,
+  month TEXT NOT NULL,           -- YYYY-MM
+  messages INTEGER NOT NULL DEFAULT 0,
+  weighted REAL NOT NULL DEFAULT 0,
+  active_days INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, month)
+);
+
+-- نتيجة فحص سلامة كل نسخة احتياطية: نسخة لم تُختبر ليست نسخة (راجع ROADMAP 2.4)
+CREATE TABLE IF NOT EXISTS backup_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  detail TEXT,
+  size_bytes INTEGER,
+  checked_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS activity_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL,
@@ -369,6 +406,21 @@ function migrate(database) {
   addTableColumns('staff_tasks', [['cancelled_by', 'TEXT'], ['cancelled_at', 'TEXT']]);
   // تاريخ آخر تقييم بشري: يمنع الاعتماد على تقييم قديم لا يصف الحاضر
   addTableColumns('staff_members', [['human_ratings_at', 'TEXT']]);
+  // «عصر» النقاط: كل رتبة عصر مستقل، فتصفير النقاط بعد الترقية لا يحتاج صفاً سلبياً مزيفاً
+  addTableColumns('staff_members', [['rank_epoch', 'INTEGER NOT NULL DEFAULT 1']]);
+  addTableColumns('promotion_points', [['rank_epoch', 'INTEGER']]);
+  database.exec('CREATE INDEX IF NOT EXISTS idx_points_epoch ON promotion_points(user_id, rank_epoch)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_activity_logs_day ON activity_logs(day)');
+
+  // ترحيل بيانات قديمة: الصفوف السابقة تنتمي للعصر 1، ومن صُفّرت نقاطه سابقاً
+  // (صف rank_reset) صار في العصر 2 مع كل ما كُسب بعده — بلا فقدان أي نقطة.
+  database.exec('UPDATE promotion_points SET rank_epoch = 1 WHERE rank_epoch IS NULL');
+  database.exec(`UPDATE staff_members SET rank_epoch = 2
+    WHERE user_id IN (SELECT DISTINCT user_id FROM promotion_points WHERE reason_key = 'rank_reset')`);
+  database.exec(`UPDATE promotion_points SET rank_epoch = 2
+    WHERE reason_key != 'rank_reset' AND id > COALESCE((SELECT MAX(id) FROM promotion_points p2
+      WHERE p2.user_id = promotion_points.user_id AND p2.reason_key = 'rank_reset'), 0)`);
+  database.exec(`UPDATE promotion_points SET rank_epoch = 2 WHERE reason_key = 'rank_reset'`);
 
   // مؤشر النشاط بالتاريخ: يخدم الاحتفاظ بالبيانات وتقارير الفترات
   database.exec('CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at)');

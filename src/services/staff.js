@@ -99,9 +99,51 @@ function touchActivity(userId) {
     .run(nowIso(), nowIso(), userId);
 }
 
-function setRank(userId, team, rank) {
-  getDb().prepare('UPDATE staff_members SET team = ?, rank = ?, rank_since = ?, status = ?, updated_at = ? WHERE user_id = ?')
-    .run(team, rank, nowIso(), 'active', nowIso(), userId);
+/**
+ * يسجّل تغيير الرتبة في staff_rank_history — الرتبة كانت تُكتب فوق نفسها،
+ * فلا يمكن معرفة «من رقّى مَن ومتى» ولا «كم بقي X في رتبته».
+ */
+function recordRankChange(userId, { fromRank, toRank, team, changeType, reason, actorId } = {}) {
+  if (!changeType) return null;
+  const res = getDb().prepare(`INSERT INTO staff_rank_history (user_id, team, from_rank, to_rank, change_type, reason, actor_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(userId, team || null, fromRank || null, toRank || null, changeType, reason || null, actorId || null);
+  return Number(res.lastInsertRowid);
+}
+
+/** أنواع الغياب عن العمل: إزالة من الفريق أو مغادرة السيرفر */
+const REMOVAL_TYPES = ['remove', 'left_guild'];
+
+/** تاريخ رتبة عضو (الأحدث أولاً) */
+function rankHistory(userId, limit = 10) {
+  return getDb().prepare('SELECT * FROM staff_rank_history WHERE user_id = ? ORDER BY id DESC LIMIT ?').all(userId, limit);
+}
+
+/** كم يوماً أمضاها العضو في رتبته الحالية/السابقة */
+function daysInRank(entry) {
+  return Math.max(0, Math.round((Date.now() - new Date(String(entry.created_at).replace(' ', 'T') + 'Z').getTime()) / 86400000));
+}
+
+/**
+ * تغيير الرتبة مع توثيق كامل: من، إلى، من نفّذ، ولماذا. يبدأ عصر نقاط جديد
+ * (نقاط الرتبة الجديدة تُحسب من الصفر بلا صف سلبي مزيف).
+ */
+function setRank(userId, team, rank, { actorId = null, reason = null, changeType = null, newEpoch = false } = {}) {
+  const before = get(userId);
+  const fromRank = before?.rank || null;
+  const type = changeType || (before && fromRank !== rank ? (rankIndexOf(team, rank) >= rankIndexOf(before.team, fromRank) ? 'promote' : 'demote') : 'reassign');
+  getDb().prepare(`UPDATE staff_members SET team = ?, rank = ?, rank_since = ?, status = ?, updated_at = ?,
+    rank_epoch = rank_epoch + ? WHERE user_id = ?`)
+    .run(team, rank, nowIso(), 'active', nowIso(), newEpoch ? 1 : 0, userId);
+  if (before && fromRank !== rank) recordRankChange(userId, { fromRank, toRank: rank, team, changeType: type, reason, actorId });
+  return { fromRank, toRank: rank, changeType: type };
+}
+
+/** ترتيب الرتبة داخل الفريق — يحدد إن كان التغيير ترقية أم تنزيلاً */
+function rankIndexOf(team, rank) {
+  const list = TEAM_RANKS[team] || [];
+  const idx = list.findIndex(r => r.name === rank);
+  return idx === -1 ? -1 : list.length - idx; // الأعلى رتبة = أعلى قيمة
 }
 
 /** تعديل رتب الديسكورد فعلياً عند الترقية أو التعيين */
@@ -185,6 +227,7 @@ function syncDeparture(member) {
   const next = existing.status === 'on_leave' ? 'on_leave' : 'removed';
   if (next === existing.status) return null;
   setStatus(member.id, next);
+  recordRankChange(member.id, { fromRank: existing.rank, toRank: existing.rank, team: existing.team, changeType: 'remove', reason: 'نُزعت كل الرتب الإدارية من ديسكورد' });
   return { previous: existing.status, next, rank: existing.rank, team: existing.team };
 }
 
@@ -193,11 +236,12 @@ function markLeft(userId) {
   const existing = get(userId);
   if (!existing || ['resigned', 'removed'].includes(existing.status)) return null;
   setStatus(userId, 'removed');
+  recordRankChange(userId, { fromRank: existing.rank, toRank: existing.rank, team: existing.team, changeType: 'left_guild', reason: 'غادر السيرفر' });
   return { previous: existing.status, rank: existing.rank, team: existing.team };
 }
 
 module.exports = {
-  get, all, ensure, setStatus, update, touchActivity, setRank,
+  get, all, ensure, setStatus, update, touchActivity, setRank, recordRankChange, rankHistory, daysInRank, REMOVAL_TYPES,
   applyRankRoles, removeTeamRoles, removeAllStaffRoles,
   vacationRole, addVacationRole, removeVacationRole,
   suspend, unsuspend, liftExpiredSuspensions, suspensionEnd,

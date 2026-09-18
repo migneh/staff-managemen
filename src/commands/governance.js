@@ -37,6 +37,7 @@ module.exports = {
         if (botMember && role.position >= botMember.roles.highest.position) return replyEphemeral(i, '❌ رتبة البوت يجب أن تكون أعلى من رتبة الإدارة العامة.', COLORS.danger);
 
         const db = getDb();
+        const existed = staffService.get(user.id);
         if (action === 'assign') {
           if (rank === 'General Manager') {
             const current = db.prepare("SELECT user_id FROM staff_members WHERE team = 'general_management' AND rank = 'General Manager' AND status != 'resigned' AND user_id != ?").get(user.id);
@@ -47,6 +48,7 @@ module.exports = {
           try { await member.roles.add(roleId, `تعيين ${rank} عبر Staff Manager`); } catch (e) { return replyEphemeral(i, `❌ فشل إضافة الرتبة: ${e.message}`, COLORS.danger); }
           const saved = staffService.ensure(member);
           if (saved) staffService.update(user.id, { status: 'active' });
+          staffService.recordRankChange(user.id, { fromRank: existed?.rank || null, toRank: rank, team: 'general_management', changeType: existed ? 'reassign' : 'promote', reason, actorId: i.user.id });
           audit.record({ action: 'general_management_assigned', actorId: i.user.id, targetId: user.id, details: { rank, reason }, channelId: i.channelId });
           await log(i.client, '🏛️ تعيين في الإدارة العامة', `<@${user.id}> أصبح **${rank}** بواسطة <@${i.user.id}>${reason ? `\nالسبب: ${reason}` : ''}`, COLORS.success);
           return i.reply({ embeds: [embed('✅ تم التعيين', `<@${user.id}> أصبح **${rank}** في **الإدارة العامة للسيرفر**.\n\nلا توجد ترقية تلقائية لهذه الرتبة؛ أي تغيير لاحق يحتاج قراراً من Server Manager أو General Manager الحالي.`, COLORS.success)], ephemeral: true });
@@ -57,6 +59,7 @@ module.exports = {
         const removed = await staffService.removeAllStaffRoles(member);
         if (!removed) return replyEphemeral(i, '❌ لم أستطع إزالة الرتب الإدارية. تحقق من صلاحيات البوت.', COLORS.danger);
         staffService.setStatus(user.id, 'resigned');
+        staffService.recordRankChange(user.id, { fromRank: existing.rank, toRank: existing.rank, team: 'general_management', changeType: 'remove', reason, actorId: i.user.id });
         audit.record({ action: 'general_management_removed', actorId: i.user.id, targetId: user.id, details: { previousRank: existing.rank, reason }, channelId: i.channelId });
         await log(i.client, '🏛️ إزالة من الإدارة العامة', `<@${user.id}> — ${existing.rank} — بواسطة <@${i.user.id}>${reason ? `\nالسبب: ${reason}` : ''}`, COLORS.warning);
         return i.reply({ embeds: [embed('✅ تمت الإزالة', `تمت إزالة <@${user.id}> من الإدارة العامة وإزالة الرتب الإدارية المرتبطة به.`, COLORS.success)], ephemeral: true });

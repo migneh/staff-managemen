@@ -8,6 +8,8 @@ const assert = require('node:assert');
 const { openMemoryDb, getDb } = require('../src/database');
 const clock = require('../src/clock');
 const staffService = require('../src/services/staff');
+const pointsService = require('../src/services/points');
+const retention = require('../src/services/retention');
 const promotions = require('../src/services/promotions');
 const { LEVELS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, INACTIVE_STATUSES } = require('../src/constants');
 const { COMPONENT_ACCESS, commands, resolveComponent, validateRegistry } = require('../src/commands');
@@ -125,6 +127,67 @@ describe('بوابات الترقية ونصابها', () => {
   });
 });
 
+describe('تاريخ الرتب وعصور النقاط (Phase 2)', () => {
+  test('تغيير الرتبة يُوثَّق: من، إلى، من نفّذ، ولماذا', () => {
+    seedStaff('m2', 'moderation', 'Senior Moderator', { since: '2024-01-01 00:00:00' });
+    const res = staffService.setRank('m2', 'moderation', 'Admin', { actorId: 'BOSS1', reason: 'ترقية معتمدة (طلب #7)', changeType: 'promote' });
+    assert.equal(res.fromRank, 'Senior Moderator');
+    assert.equal(res.changeType, 'promote');
+    const [row] = staffService.rankHistory('m2');
+    assert.equal(row.from_rank, 'Senior Moderator');
+    assert.equal(row.to_rank, 'Admin');
+    assert.equal(row.actor_id, 'BOSS1');
+    assert.match(row.reason, /طلب #7/);
+    assert.equal(staffService.get('m2').rank, 'Admin');
+    assert.ok(staffService.get('m2').rank_since);
+  });
+  test('النقاط تُفصل بعصور: ترقية تبدأ عصراً جديداً والسجل التاريخي يبقى كاملاً', () => {
+    seedStaff('p1', 'moderation', 'Moderator', { since: '2024-01-01 00:00:00' });
+    pointsService.add('p1', 'mod_action', 'moderation');
+    pointsService.add('p1', 'mod_action', 'moderation');
+    assert.equal(pointsService.total('p1'), 6);
+    const reset = pointsService.resetForNewRank('p1');
+    assert.equal(reset.previousTotal, 6);
+    assert.equal(reset.epoch, 2);
+    assert.equal(pointsService.total('p1'), 0, 'الرتبة الجديدة تبدأ من صفر');
+    assert.equal(pointsService.total('p1', null, { allEpochs: true }), 6, 'التاريخ لا يُفقد');
+    pointsService.add('p1', 'mod_action', 'moderation');
+    assert.equal(pointsService.total('p1'), 3);
+    const hist = pointsService.history('p1');
+    assert.equal(hist.filter(h => h.counts).length, 1);
+    assert.equal(hist.filter(h => !h.counts).length, 2);
+  });
+});
+
+describe('صيانة البيانات (Phase 2)', () => {
+  test('التجميع يسبق الحذف: الأشهر القديمة تُلخّص ثم تُحذف صفوفها الخام', () => {
+    const db = getDb();
+    const ins = db.prepare(`INSERT INTO activity_logs (user_id, channel_id, channel_type, weight, day) VALUES ('u','1','staff',0.25,?)`);
+    for (let d = 1; d <= 10; d++) ins.run(`2024-01-${String(d).padStart(2, '0')}`);
+    for (let d = 1; d <= 3; d++) ins.run(`${clock.today().slice(0, 7)}-0${d}`);
+
+    const dry = retention.run({ dryRun: true });
+    assert.equal(dry.activity.pending, 10, 'المعاينة تعرض ما سيُحذف');
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM activity_logs').get().c, 13, 'المعاينة لا تحذف شيئاً');
+
+    const r = retention.run({ dryRun: false });
+    assert.equal(r.rollup.rows, 1);
+    const monthly = db.prepare("SELECT * FROM activity_monthly WHERE month = '2024-01'").get();
+    assert.equal(monthly.messages, 10);
+    assert.equal(monthly.active_days, 10);
+    assert.equal(r.activity.deleted, 10);
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM activity_logs').get().c, 3, 'يبقى النشاط داخل النافذة');
+  });
+  test('التقليم يعمل على سجل العمليات فقط بعد المدة المحددة', () => {
+    const db = getDb();
+    db.prepare("INSERT INTO audit_logs (action, created_at) VALUES ('old', '2020-01-01 00:00:00')").run();
+    db.prepare("INSERT INTO audit_logs (action) VALUES ('new')").run();
+    const r = retention.pruneAudit({ dryRun: false });
+    assert.equal(r.deleted, 1);
+    assert.deepEqual(db.prepare('SELECT action FROM audit_logs').all().map(x => x.action), ['new']);
+  });
+});
+
 describe('الإيقاف المؤقت', () => {
   test('يُرفع تلقائياً عند انتهاء المدة ويُبلّغ بالقائمة', () => {
     seedStaff('u1', 'support', 'Support');
@@ -138,6 +201,16 @@ describe('الإيقاف المؤقت', () => {
     assert.equal(staffService.get('u2').status, 'suspended');
     // لا يُرفع مرتين
     assert.equal(staffService.liftExpiredSuspensions('2026-09-11').length, 0);
+  });
+  test('الإزالة والمغادرة تُوثَّق في تاريخ الرتب', () => {
+    seedStaff('u4', 'moderation', 'Admin');
+    const dep = staffService.markLeft('u4');
+    assert.equal(dep.previous, 'active');
+    const [row] = staffService.rankHistory('u4');
+    assert.equal(row.change_type, 'left_guild');
+    assert.equal(row.from_rank, 'Admin');
+    assert.match(row.reason, /غادر/);
+    assert.ok(staffService.REMOVAL_TYPES.includes('left_guild'));
   });
   test('المغادرة ونزع الرتب تُحدّث الحالة بدل بقائها نشطة', () => {
     seedStaff('u3', 'support', 'Support');
