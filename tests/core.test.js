@@ -61,13 +61,22 @@ describe('النقاط والتبريد', () => {
 });
 
 describe('Score', () => {
-  test('Helper يُحسب بدون تكتات', () => {
+  test('Helper يُحسب بدون تكتات، والتقييم الغائب لا يمنح نقاطاً مجانية', () => {
     const s = seedStaff('h1', 'support', 'Helper');
     const r = score.compute(s, { messages: 200, activeDays: 26, tickets: 0 });
     assert.equal(r.factors.length, 4);
     assert.equal(r.factors[0].pts, 25);
     assert.equal(r.factors[1].pts, 25);
-    assert.equal(r.score, 70); // 25+25+10+10 (تقييمات افتراضية)
+    // تفاعل الفريق وتقييم المشرف غير مُقيَّمين: وزنهما (50) خارج المقام
+    assert.equal(r.assessedMax, 50);
+    assert.equal(r.factors[2].assessed, false);
+    assert.equal(r.factors[3].assessed, false);
+    assert.equal(r.score, 100); // (25+25) / 50
+    // عند وجود تقييم مشرف يحتسب مقامه ويُنقص النسبة فعلياً
+    // التقييمات البشرية على سلم 5-25 (كما في قاعدة البيانات)، فيدخل وزنها في المقام
+    const rated = score.compute({ ...s, supervisor_rating: 20 }, { messages: 200, activeDays: 26, tickets: 0 });
+    assert.equal(rated.assessedMax, 75);
+    assert.equal(rated.score, Math.round(((25 + 25 + 20) / 75) * 100));
   });
   test('Support يُحسب بالتكتات والسرعة', () => {
     const s = seedStaff('s1', 'support', 'Support');
@@ -75,11 +84,13 @@ describe('Score', () => {
     assert.equal(r.score, 30 + 25 + 20 + 16);
     assert.equal(score.grade(r.score), 'ممتاز');
   });
-  test('الإشراف يُحسب بالمخالفات', () => {
+  test('الإشراف يُحسب بالمخالفات، وسرعة الاستجابة غير المُقيَّمة تُستثنى من المقام', () => {
     const s = seedStaff('m1', 'moderation', 'Moderator');
     const r = score.compute(s, { messages: 10, activeDays: 5, actions: 60 });
     assert.equal(r.factors[0].pts, 30);
-    assert.equal(r.score, 30 + 10 + 5 + 4);
+    assert.equal(r.factors[1].assessed, false); // response_speed فارغ
+    assert.equal(r.assessedMax, 75);            // 30 + 25 + 20
+    assert.equal(r.score, Math.round(((30 + 5 + 4) / 75) * 100)); // = 52
   });
 });
 
@@ -103,7 +114,9 @@ describe('الترقيات', () => {
     db.prepare(`INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES ('t1', 'first', 'r', 'b')`).run();
     ev = promo.evaluate(s);
     assert.equal(ev.eligible, false);
-    assert.equal(ev.checks.find(c => c.label === 'الإنذارات الرسمية').pass, false);
+    assert.equal(ev.checks.find(c => c.label.startsWith('الإنذارات الرسمية')).pass, false);
+    // كل شرط يعرض قيمته الفعلية والمطلوبة (لا رسائل مبهمة)
+    for (const c of ev.checks) { assert.ok(c.actual != null && c.required != null, `شرط ناقص العرض: ${c.label}`); }
   });
   test('Boss لا يملك ترقية', () => {
     const s = seedStaff('b1', 'support', 'Boss');
@@ -207,9 +220,17 @@ describe('التقارير والـ Leaderboard', () => {
     seedStaff('l', 'support', 'Support', { status: 'on_leave' });
     seedStaff('s', 'support', 'Support');
     seedStaff('m', 'moderation', 'Admin');
+    // بلا نشاط: لا أحد مؤهل للترتيب، والجميع في قائمة «غير مصنّف» بدل ظهورهم بأرقام وهمية
     const lb = reports.leaderboard('support');
-    assert.deepEqual(lb.map(r => r.staff.user_id), ['s']);
-    assert.equal(reports.leaderboard().length, 2);
+    assert.deepEqual(lb.map(r => r.staff.user_id), []);
+    assert.deepEqual(lb.unranked.map(r => r.staff.user_id), ['s']);
+    assert.equal(reports.leaderboard().length, 0);
+    assert.equal(reports.leaderboard().unranked.length, 2);
+    // بعد نشاط حقيقي يظهر في الترتيب
+    for (let k = 0; k < 8; k++) getDb().prepare(`INSERT INTO activity_logs (user_id, channel_id, channel_type, weight, day) VALUES ('s', '1', 'staff', 0.25, ?)`).run(`2026-09-0${k + 1}`);
+    const after = reports.leaderboard('support');
+    assert.deepEqual(after.map(r => r.staff.user_id), ['s']);
+    assert.equal(after[0].qualified, true);
     const d = reports.daily();
     assert.equal(d.total, 4);
     assert.equal(d.onLeave, 1);
@@ -282,6 +303,12 @@ describe('استيراد سجل التكتات الخارجي', () => {
     const first = ticketLogs.recordTicket(parsed);
     assert.equal(first.duplicate, false);
     assert.equal(first.earned, 2);
+    // المدة تُحلل إلى دقائق ولو جاءت بصيغة ساعة:دقيقة
+    assert.equal(ticketLogs.parseDuration('01:23'), 83);
+    assert.equal(ticketLogs.parseDuration('00:07:30'), 8);
+    assert.equal(ticketLogs.parseDuration('45 دقيقة'), 45);
+    assert.equal(ticketLogs.parseDuration('2 ساعات'), 120);
+    assert.equal(ticketLogs.parseDuration(''), null);
     const second = ticketLogs.recordTicket(parsed);
     assert.equal(second.duplicate, true);
     assert.equal(getDb().prepare('SELECT COUNT(*) c FROM ticket_metrics').get().c, 1);

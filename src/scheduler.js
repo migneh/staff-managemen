@@ -13,8 +13,12 @@ const { embed, COLORS, sendToChannel, dm, hoursSince, today, addDays, daysBetwee
 const reportCmds = require('./commands/reports');
 const backup = require('./services/backup');
 const kit = require('./ui/kit');
+const clock = require('./clock');
+const { INACTIVE_STATUSES } = require('./constants');
+const logger = require('./logger').log('scheduler');
+const config = require('./config');
 
-const EXEMPT = ['on_leave', 'suspended', 'resigned'];
+const EXEMPT = INACTIVE_STATUSES;
 
 // ===== فاحص الغياب — يتجمد أثناء الإجازة =====
 async function checkAbsence(client) {
@@ -36,9 +40,7 @@ async function checkAbsence(client) {
 
 // ===== الإجازات: تفعيل الرتبة / إنهاء / تذكيرات / مزامنة / انتهاء المعلقة =====
 async function guildMember(client, userId) {
-  const guild = client.guilds?.cache?.get(settings.load()?.guildId || require('./config').guildId) || client.guilds?.cache?.get(require('./config').guildId) || client.guilds?.cache?.first?.();
-  // fallback: ابحث في كل السيرفرات
-  const g = guild || [...(client.guilds?.cache?.values?.() || [])][0];
+  const g = client.guilds?.cache?.get(config.guildId) || [...(client.guilds?.cache?.values?.() || [])][0];
   try { return g?.members?.fetch ? await g.members.fetch(userId) : null; } catch { return null; }
 }
 
@@ -74,19 +76,16 @@ async function processLeaves(client) {
       await dm(client, r.user_id, { embeds: [embed('🏖️ تذكير بداية الإجازة', `إجازتك **#${r.id}** تبدأ غداً (${kit.tsDate(r.start_date)}).\n${policy.vacationRoleTiming === 'at_start' ? 'ستُفعّل رتبة **in vacation** تلقائياً.' : 'رتبة **in vacation** مفعّلة من الموافقة.'}`, COLORS.info)] });
     }
 
-    // تفعيل الحالة والرتبة
-    const timing = policy.vacationRoleTiming || 'at_start';
+    // تفعيل الحالة والرتبة — التوقيت (at_start / at_approval) يُطبَّق في
+    // leaves.syncVacationRole عند الموافقة، وهنا نضمن الرتبة عند بداية الإجازة فعلياً.
     if (r.start_date <= t && r.end_date >= t) {
       if (s && s.status !== 'on_leave' && s.status !== 'resigned') staffService.setStatus(r.user_id, 'on_leave');
       if (member) {
-        // at_start: فعّل فقط عندما تبدأ. at_approval: كانت مفعلة من الموافقة
-        const shouldAdd = timing === 'at_start' ? true : true;
-        if (shouldAdd) {
-          const roleResult = await staffService.addVacationRole(member);
-          if (roleResult.ok && !r.role_applied_at) db.prepare("UPDATE leave_requests SET role_applied_at = datetime('now') WHERE id = ?").run(r.id);
-          if (!roleResult.ok && leaveService.markReminder(r.id, r.reminders_sent, 'role_retry')) {
-            await sendToChannel(client, 'staff-logs', { embeds: [embed('⚠️ تعذر تفعيل رتبة in vacation', `الإجازة **#${r.id}** لـ <@${r.user_id}> — ${roleResult.missing ? 'الرتبة غير مربوطة في /setup' : roleResult.error?.message || 'صلاحيات'}`, COLORS.warning)] });
-          }
+        // الرتبة مطلوبة عند بداية الإجازة فعلياً، بغض النظر عن توقيت المنح (at_start أو at_approval).
+        const roleResult = await staffService.addVacationRole(member);
+        if (roleResult.ok && !r.role_applied_at) db.prepare("UPDATE leave_requests SET role_applied_at = datetime('now') WHERE id = ?").run(r.id);
+        if (!roleResult.ok && leaveService.markReminder(r.id, r.reminders_sent, 'role_retry')) {
+          await sendToChannel(client, 'staff-logs', { embeds: [embed('⚠️ تعذر تفعيل رتبة in vacation', `الإجازة **#${r.id}** لـ <@${r.user_id}> — ${roleResult.missing ? 'الرتبة غير مربوطة في /setup' : roleResult.error?.message || 'صلاحيات'}`, COLORS.warning)] });
         }
       }
     }
@@ -103,10 +102,8 @@ async function processLeaves(client) {
       await updateLeaveMessage(client, r.id);
       const remaining = leaveService.activeForUser(r.user_id, t);
       if (s && s.status === 'on_leave' && !remaining.length) staffService.update(r.user_id, {
-        status: 'active', absence_alert_level: 0, last_activity: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        status: 'active', absence_alert_level: 0, last_activity: clock.nowIso(),
       });
-    } else {
-      // مزامنة الرسالة أيضاً للإجازات النشطة (حتى يظهر عدّاد التغطية المحدث)
     }
   }
 
@@ -214,6 +211,21 @@ async function processResignations(client) {
 }
 
 // ===== التقارير =====
+/**
+ * يرفع الإيقاف عن كل من انتهت مدته (suspended_until) ويُعلم الفريق.
+ * بلا هذه المهمة يبقى الموقوف موقوفاً للأبد لأن حالة الإيقاف لا تنتهي ذاتياً.
+ */
+async function liftSuspensions(client) {
+  const lifted = staffService.liftExpiredSuspensions(clock.today());
+  if (!lifted.length) return;
+  for (const m of lifted) {
+    audit.record({ action: 'suspension_lifted', targetId: m.user_id, details: { until: m.until } });
+    await dm(client, m.user_id, { embeds: [embed('✅ انتهى الإيقاف', `انتهت مدة إيقافك (${m.until}) وعادت حالتك إلى **active**.`, COLORS.success)] });
+  }
+  await sendToChannel(client, 'staff-updates', { embeds: [embed('🔓 انتهاء إيقاف', lifted.map(m => `<@${m.user_id}> — انتهى إيقافه (${m.until})`).join('\n'), COLORS.success)] });
+  logger.info(`🔓 رُفع الإيقاف عن ${lifted.length} عضو.`);
+}
+
 async function dailyReport(client) {
   const d = reports.daily();
   reports.save('daily', today(), d);
@@ -225,25 +237,51 @@ async function dailyReport(client) {
 }
 
 async function weeklyReport(client) {
-  for (const m of staffService.all()) {
+  const all = staffService.all();
+  const week = today();
+
+  // ===== نقاط الأسبوع =====
+  // سياسة معلنة: لا خصم تراكمي. الأسبوع الضعيف يُراجع بشرياً (قائمة المراجعة أدناه)
+  // بدل آخر -10 في الرصيد بلا سقف — وهي الحلقة التي أوصلت الفريق إلى أرقام سالبة.
+  const below = [];
+  for (const m of all) {
     if (EXEMPT.includes(m.status)) continue;
+    if (m.status === 'probation') continue; // عضو جديد لا يُعاقب قبل أن يبدأ
     if (leaveService.activeForUser(m.user_id).length) continue;
     const sc = score.compute(m, score.monthlyRaw(m.user_id, 7)).score;
-    if (sc >= 80) points.add(m.user_id, 'week_above_80', m.team, { refType: 'week', refId: today() });
-    else if (sc < 50) points.add(m.user_id, 'week_below_50', m.team, { refType: 'week', refId: today() });
+    if (sc >= 80) points.add(m.user_id, 'week_above_80', m.team, { refType: 'week', refId: week });
+    else if (sc < 50) below.push({ user: m.user_id, rank: m.rank, score: sc });
   }
-  const embeds = [embed(`📆 التقرير الأسبوعي — ${kit.tsDate(today())}`, 'ترتيب الفرق والتقارير الفردية أدناه.', COLORS.primary)];
+
+  // ===== الترتيب =====
+  const windowDays = reportCmds.LEADERBOARD_WINDOW_DAYS;
+  const embeds = [embed(`📆 التقرير الأسبوعي — ${kit.tsDate(week)}`, `الترتيب على آخر **${windowDays}** يوماً (نافذة موحّدة لكل تقارير الترتيب).`, COLORS.primary)];
   for (const t of ['support', 'moderation']) {
-    const lb = reports.leaderboard(t);
-    reports.save('weekly', `${today()}:${t}`, lb.map(r => ({ user: r.staff.user_id, score: r.score, points: r.points })));
-    embeds.push(reportCmds.leaderboardEmbed(lb, `🏆 ترتيب ${t === 'support' ? 'فريق الدعم الفني' : 'فريق الإشراف'} (أسبوعي)`));
+    const lb = reports.leaderboard(t, windowDays);
+    reports.save('weekly', `${week}:${t}`, lb.map(r => ({ user: r.staff.user_id, score: r.score, points: r.points })));
+    embeds.push(reportCmds.leaderboardEmbed(lb, `🏆 ترتيب ${t === 'support' ? 'فريق الدعم الفني' : 'فريق الإشراف'} (آخر ${windowDays} يوم)`, windowDays));
   }
   await sendToChannel(client, 'performance-reports', { embeds });
-  for (const m of staffService.all()) {
-    if (m.status === 'resigned') continue;
-    await dm(client, m.user_id, { embeds: [reportCmds.performanceEmbed(reports.individual(m))] });
+
+  // ===== قائمة مراجعة بشرية بدل الخصم =====
+  if (below.length) {
+    const lines = below.sort((a, b) => a.score - b.score).slice(0, 15)
+      .map(r => `• <@${r.user}> — ${r.rank} • Score ${r.score}`);
+    await sendToChannel(client, 'staff-alerts', {
+      embeds: [embed('🔎 للمراجعة البشرية — أداء أسبوعي منخفض',
+        `${lines.join('\n')}${below.length > 15 ? `\n_… و${below.length - 15} آخرين_` : ''}\n\n_لا يُخصم شيء تلقائياً. راجعوا الحالة واتخذوا قراراً موثقاً (إنذار/مهمة متابعة/تدريب)._`,
+        COLORS.warning)],
+    });
   }
-  const idle = staffService.all().filter(m => !EXEMPT.includes(m.status) && !leaveService.activeForUser(m.user_id).length && hoursSince(m.last_activity || m.joined_at) >= ABSENCE.idleDays * 24);
+
+  // ===== تقارير فردية بالخاص =====
+  for (const m of all) {
+    if (m.status === 'resigned' || m.status === 'removed') continue;
+    await dm(client, m.user_id, { embeds: [reportCmds.performanceEmbed(reports.individual(m, windowDays))] });
+  }
+
+  const idle = all.filter(m => !EXEMPT.includes(m.status) && m.status !== 'probation'
+    && !leaveService.activeForUser(m.user_id).length && hoursSince(m.last_activity || m.joined_at) >= ABSENCE.idleDays * 24);
   if (idle.length) await sendToChannel(client, 'staff-alerts', { embeds: [embed('💤 إداريون خاملون (7 أيام+)', idle.map(m => `<@${m.user_id}> — ${m.rank}`).join('\n'), COLORS.danger)] });
 }
 
@@ -277,17 +315,88 @@ async function monthlyReport(client) {
   await sendToChannel(client, 'performance-reports', { embeds });
 }
 
-function start(client) {
-  const tz = process.env.TZ || 'Asia/Riyadh';
-  cron.schedule('*/30 * * * *', () => checkAbsence(client).catch(console.error), { timezone: tz });
-  cron.schedule('5 0 * * *', () => processLeaves(client).catch(console.error), { timezone: tz });
-  cron.schedule('20 0 * * *', () => processResignations(client).catch(console.error), { timezone: tz });
-  cron.schedule('15 0 * * *', () => backup.createBackup({ reason: 'scheduled' }).catch(e => console.error('فشل النسخ الاحتياطي التلقائي:', e.message)), { timezone: tz });
-  cron.schedule('0 9 * * *', () => dailyReport(client).catch(console.error), { timezone: tz });
-  cron.schedule('0 10 * * 5', () => weeklyReport(client).catch(console.error), { timezone: tz });
-  cron.schedule('0 11 1 * *', () => monthlyReport(client).catch(console.error), { timezone: tz });
-  setTimeout(() => { checkAbsence(client).catch(console.error); processLeaves(client).catch(console.error); processResignations(client).catch(console.error); }, 10_000);
-  console.log('⏰ المجدول يعمل.');
+/**
+ * حارس لكل مهمة: يمنع تشغيل نسختين متزامنتين (مهمة غياب طويلة قد تتجاوز 30
+ * دقيقة فتتراكب)، ويحفظ آخر تشغيل في جدول job_runs ليظهر في /status.
+ */
+const running = new Set();
+const tasks = [];
+/** قائمة المهام المعروضة في /status */
+const JOBS = [];
+
+function guarded(name, fn) {
+  const wrapped = async () => {
+    if (running.has(name)) {
+      logger.warn(`المهمة "${name}" ما زالت تعمل — تم تخطي هذه الدورة.`);
+      return;
+    }
+    running.add(name);
+    const startedAt = new Date().toISOString();
+    try {
+      await fn();
+      recordRun(name, startedAt, null);
+    } catch (e) {
+      logger.error(`فشل المهمة "${name}":`, e);
+      recordRun(name, startedAt, e.message);
+    } finally {
+      running.delete(name);
+      lastRun.set(name, Date.now());
+    }
+  };
+  tasks.push({ name, run: wrapped });
+  return wrapped;
 }
 
-module.exports = { start, checkAbsence, processLeaves, processResignations, dailyReport, weeklyReport, monthlyReport };
+function recordRun(name, startedAt, error) {
+  try {
+    getDb().prepare(`INSERT INTO job_runs (job, started_at, finished_at, ok, error) VALUES (?, ?, ?, ?, ?)`)
+      .run(name, startedAt, new Date().toISOString(), error ? 0 : 1, error || null);
+    // نحتفظ بآخر 50 تشغيلاً لكل مهمة
+    getDb().prepare(`DELETE FROM job_runs WHERE job = ? AND id NOT IN (SELECT id FROM job_runs WHERE job = ? ORDER BY id DESC LIMIT 50)`).run(name, name);
+  } catch (e) { logger.warn(`تعذّر تسجيل تشغيل المهمة ${name}: ${e.message}`); }
+}
+
+/** آخر تشغيل ناجح/فاشل لكل مهمة — يُقرأ من /status */
+function status() {
+  const rows = getDb().prepare(`SELECT job, MAX(id) id FROM job_runs GROUP BY job`).all();
+  const last = {};
+  for (const { id } of rows) {
+    const row = getDb().prepare('SELECT * FROM job_runs WHERE id = ?').get(id);
+    last[row.job] = { finishedAt: row.finished_at, ok: !!row.ok, error: row.error };
+  }
+  return last;
+}
+
+function start(client) {
+  const tz = clock.TZ;
+  const jobs = [
+    ['absence', '*/30 * * * *', () => checkAbsence(client)],
+    ['suspensions', '0 1 * * *', () => liftSuspensions(client)],
+    ['leaves', '5 0 * * *', () => processLeaves(client)],
+    ['resignations', '20 0 * * *', () => processResignations(client)],
+    ['backup', '15 0 * * *', () => backup.createBackup({ reason: 'scheduled' })],
+    ['daily-report', '0 9 * * *', () => dailyReport(client)],
+    ['weekly-report', '0 10 * * 5', () => weeklyReport(client)],
+    ['monthly-report', '0 11 1 * *', () => monthlyReport(client)],
+  ];
+  JOBS.length = 0;
+  JOBS.push(...jobs.map(([name, expr]) => ({ name, expr, tz })));
+  for (const [name, expr, fn] of jobs) {
+    const run = guarded(name, fn);
+    const scheduled = cron.schedule(expr, run, { timezone: tz });
+    scheduledTasks.push(scheduled);
+  }
+  // تشغيل أولي خفيف بعد الإقلاع
+  setTimeout(() => { for (const t of tasks) t.run(); }, 10_000);
+  logger.info(`⏰ المجدول يعمل (${jobs.length} مهمة • المنطقة الزمنية ${tz}).`);
+}
+
+const scheduledTasks = [];
+const lastRun = new Map();
+
+function stop() {
+  for (const t of scheduledTasks) { try { t.stop(); } catch { /* ignore */ } }
+  scheduledTasks.length = 0;
+}
+
+module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, dailyReport, weeklyReport, monthlyReport, JOBS };

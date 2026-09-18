@@ -5,7 +5,6 @@ const { getDb } = require('../database');
 const ticketLogs = require('../services/ticketLogs');
 const audit = require('../services/audit');
 const points = require('../services/points');
-const staffService = require('../services/staff');
 const { embed, COLORS, replyEphemeral, sendToChannel } = require('../utils');
 
 const ID_RE = /^\d{15,22}$/;
@@ -50,7 +49,7 @@ module.exports = {
           field('claimer', 'ID من استلم التكت', { max: 22, ph: 'اتركه = ID الخاص بك', required: false }),
           field('closer', 'ID من قفل التكت — اختياري', { max: 22, required: false }),
           field('rating', 'تقييم العميل (1-5) — اختياري', { max: 1, required: false }),
-          field('duration', 'مدة الحل بالدقائق — اختياري', { max: 5, required: false }),
+          field('duration', 'مدة الحل — اختياري (دقائق أو HH:MM)', { max: 10, required: false, ph: 'مثال: 45 أو 01:23' }),
         );
         return i.showModal(m);
       },
@@ -85,9 +84,9 @@ module.exports = {
       if (!ID_RE.test(owner) || !ID_RE.test(claimer) || !ID_RE.test(closer)) return replyEphemeral(i, '❌ معرفات الأعضاء غير صحيحة.', COLORS.danger);
       const rating = ratingRaw ? Number(ratingRaw) : null;
       if (rating != null && !(rating >= 1 && rating <= 5)) return replyEphemeral(i, '❌ التقييم يجب أن يكون بين 1 و 5.', COLORS.danger);
-      const duration = durRaw ? Number(durRaw) : null;
-      if (duration != null && !(duration >= 0)) return replyEphemeral(i, '❌ المدة غير صحيحة.', COLORS.danger);
-      return saveTicket(i, { ticketId, owner, claimer, closer, rating, duration, loggedBy: i.user.id, source: 'manual' });
+      const duration = durRaw ? ticketLogs.parseDuration(durRaw) : null;
+      if (durRaw && !(duration >= 0)) return replyEphemeral(i, '❌ المدة غير صحيحة. اكتب دقائق مثل `45` أو ساعة:دقيقة مثل `01:23`.', COLORS.danger);
+      return saveTicket(i, { ticketId, owner, claimer, closer, rating, duration, durationSource: duration == null ? null : 'reported', loggedBy: i.user.id, source: 'manual' });
     },
 
     'modaction:log': async (i, [type]) => {

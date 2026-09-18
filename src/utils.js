@@ -1,6 +1,6 @@
 'use strict';
 const { EmbedBuilder } = require('discord.js');
-const config = require('./config');
+const clock = require('./clock');
 const settings = () => require('./services/settings');
 
 const COLORS = { primary: 0x5865f2, success: 0x57f287, warning: 0xfee75c, danger: 0xed4245, info: 0x3498db, gray: 0x99aab5 };
@@ -25,35 +25,33 @@ const divider = '━━━━━━━━━━━━━━━━━━━━';
 function scoreColor(score) { return score >= 85 ? 0x2ecc71 : score >= 70 ? 0x3498db : score >= 50 ? 0xf1c40f : 0xe74c3c; }
 function scoreEmoji(score) { return score >= 85 ? '🟢' : score >= 70 ? '🔵' : score >= 50 ? '🟡' : '🔴'; }
 
-function nowIso() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
-function today() { return new Date().toISOString().slice(0, 10); }
-function addDays(dateStr, days) {
-  const d = new Date(dateStr + (dateStr.length === 10 ? 'T00:00:00Z' : ''));
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-function isValidDate(s) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(s + 'T00:00:00Z');
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}
-function daysBetween(a, b) {
-  return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
-}
-function monthsSince(isoDate) {
-  const ms = Date.now() - new Date(isoDate.replace(' ', 'T') + (isoDate.length <= 19 ? 'Z' : '')).getTime();
-  return ms / (30.44 * 86400000);
-}
-function hoursSince(isoDate) {
-  if (!isoDate) return Infinity;
-  return (Date.now() - new Date(isoDate.replace(' ', 'T') + 'Z').getTime()) / 3600000;
-}
-function discordTs(dateStr, style = 'D') {
-  const t = Math.floor(new Date(dateStr.replace(' ', 'T') + (dateStr.length <= 19 ? 'Z' : '')).getTime() / 1000);
-  return `<t:${t}:${style}>`;
-}
+// كل حسابات الوقت في مكان واحد — راجع src/clock.js لمعرفة قاعدة التوقيت.
+const { nowIso, today, addDays, isValidDate, daysBetween, monthsSince, hoursSince, discordTs } = clock;
 
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n - 1) + '…' : s || ''; }
+
+// ===== الأرقام: تُعرض عربية-هندية في الواجهة، وتُقرأ بأي شكل من المستخدم =====
+const AR_DIGITS_MAP = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+/**
+ * يعرض الرقم بأرقام عربية-هندية (٠١٢...) كما يكتبها الفريق في ديسكورد.
+ * الأرقام الغربية تبقى مقبولة في المدخلات — راجع normalizeDigits.
+ */
+function arDigits(value) {
+  return String(value).replace(/\d/g, d => AR_DIGITS_MAP[Number(d)]);
+}
+
+/** يحوّل أي أرقام عربية-هندية (٠-٩) أو فارسية (۰-۹) إلى غربية قبل التحقق أو الحساب */
+function normalizeDigits(value) {
+  return String(value == null ? '' : value)
+    .replace(/[٠-٩]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x06F0));
+}
+
+/** يحوّل نصاً عربياً إلى رقم صحيح أو null — يقبل «٤٢» و«42» و« 42 » */
+function toInt(value) {
+  const n = normalizeDigits(value).replace(/[^\d-]/g, '');
+  return /^-?\d+$/.test(n) ? Number(n) : null;
+}
 
 async function getChannel(client, key) {
   const id = settings().channelId(key);
@@ -63,8 +61,15 @@ async function getChannel(client, key) {
 
 async function sendToChannel(client, key, payload) {
   const ch = await getChannel(client, key);
-  if (!ch) return null;
-  try { return await ch.send(payload); } catch (e) { console.error(`فشل الإرسال إلى #${key}:`, e.message); return null; }
+  if (!ch) {
+    // القناة غير مربوطة أو حُذفت — نسجّل مرة واحدة بدل الفشل الصامت.
+    require('./logger').log('utils').warn(`قناة غير متاحة: ${key} — الإرسال متوقف. راجع /setup`);
+    return null;
+  }
+  try { return await ch.send(payload); } catch (e) {
+    require('./logger').log('utils').error(`فشل الإرسال إلى #${key}: ${e.message}`);
+    return null;
+  }
 }
 
 async function log(client, title, description, color = COLORS.gray) {
@@ -90,4 +95,9 @@ function progressBar(value, max, size = 10) {
   return '▰'.repeat(filled) + '▱'.repeat(size - filled);
 }
 
-module.exports = { COLORS, embed, userEmbed, ok, fail, divider, scoreColor, scoreEmoji, nowIso, today, addDays, isValidDate, daysBetween, monthsSince, hoursSince, discordTs, truncate, getChannel, sendToChannel, log, dm, replyEphemeral, progressBar };
+module.exports = {
+  COLORS, embed, userEmbed, ok, fail, divider, scoreColor, scoreEmoji,
+  nowIso, today, addDays, isValidDate, daysBetween, monthsSince, hoursSince, discordTs,
+  arDigits, normalizeDigits, toInt, truncate,
+  getChannel, sendToChannel, log, dm, replyEphemeral, progressBar,
+};

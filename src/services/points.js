@@ -17,8 +17,14 @@ function valueFor(key, team) {
 function add(userId, key, team, { reason, refType, refId, addedBy, override } = {}) {
   const pts = override ?? valueFor(key, team);
   if (!pts) return 0;
-  getDb().prepare(`INSERT INTO promotion_points (user_id, points, reason_key, reason, ref_type, ref_id, added_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(userId, pts, key, reason || POINTS[key]?.label || key, refType || null, refId != null ? String(refId) : null, addedBy || null);
+  try {
+    getDb().prepare(`INSERT INTO promotion_points (user_id, points, reason_key, reason, ref_type, ref_id, added_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(userId, pts, key, reason || POINTS[key]?.label || key, refType || null, refId != null ? String(refId) : null, addedBy || null);
+  } catch (e) {
+    // مرجع مكرر (نفس المهمة/التكت/الأسبوع) — لا نحتسبها مرتين.
+    if (String(e.message).includes('UNIQUE')) return 0;
+    throw e;
+  }
   return pts;
 }
 

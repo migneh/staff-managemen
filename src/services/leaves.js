@@ -2,12 +2,10 @@
 const { getDb } = require('../database');
 const staffService = require('./staff');
 const settings = require('./settings');
-const { LEAVE_GLOBAL } = require('../constants');
 const { today, daysBetween, isValidDate } = require('../utils');
 
 const APPROVED = "status = 'approved'";
 const PENDING_OR_APPROVED = "status IN ('pending', 'approved')";
-const ACTIVE_LIKE = "status IN ('pending','approved')";
 
 // ===== استعلامات أساسية =====
 function concurrentApproved(start, end, excludeId = null) {

@@ -3,7 +3,11 @@ const { SlashCommandBuilder } = require('discord.js');
 const { LEVELS, TEAMS, STATUS, WARNING_TYPES } = require('../constants');
 const reports = require('../services/reports');
 const staffService = require('../services/staff');
-const { embed, COLORS, replyEphemeral, progressBar, scoreColor, scoreEmoji, divider } = require('../utils');
+const { embed, COLORS, replyEphemeral, progressBar, scoreColor, scoreEmoji, divider, nowIso } = require('../utils');
+const { LEADERBOARD_MIN_ACTIVE_DAYS } = require('../services/reports');
+
+/** النافذة الموحّدة للترتيب — أسبوعان أعدل من 7 أيام في الفرق الصغيرة */
+const LEADERBOARD_WINDOW_DAYS = 14;
 
 function performanceEmbed(r) {
   const { staff, raw } = r;
@@ -14,9 +18,11 @@ function performanceEmbed(r) {
       ? [{ name: '🎫 التكتات', value: `${raw.tickets}`, inline: true }, { name: '⏱️ متوسط الحل', value: raw.avgDuration != null ? `${raw.avgDuration} د` : '—', inline: true }, { name: '⭐ التقييم', value: raw.avgRating != null ? `${raw.avgRating}` : '—', inline: true }]
       : [{ name: '🛡️ المخالفات المعالجة', value: `${raw.actions}`, inline: true }]),
     { name: '📅 أيام النشاط', value: `${raw.activeDays}/30`, inline: true },
+    ...(raw.weightedMessages != null ? [{ name: '📡 وزن النشاط', value: `${raw.messages} رسالة → وزن ${Math.round(raw.weightedMessages)}`, inline: true }] : []),
     { name: '🚫 أيام الغياب', value: `${r.absentDays}`, inline: true },
     { name: '🏖️ أيام الإجازة', value: `${raw.leaveDays}`, inline: true },
     { name: '⚠️ الإنذارات', value: r.warnings.length ? r.warnings.map(w => `${WARNING_TYPES[w.warning_type]?.label}: ${w.c}`).join(' • ') : 'لا يوجد', inline: true },
+    ...(r.assessedMax != null && r.assessedMax < 100 ? [{ name: '🧮 كيف حُسب Score', value: `المقياس يُحتسب على **${r.assessedMax}** نقطة فقط (تُستثنى العوامل غير المُقيَّمة) ثم يُوحَّد إلى 100 — فلا تُمنح نقاط مقابل شيء لم يُقيَّم.` }] : []),
     { name: '📝 الملاحظات', value: `🟢 ${raw.positiveNotes} • 🟡 ${raw.negativeNotes}`, inline: true },
     { name: '🎯 نقاط الترقية', value: `${r.points}`, inline: true },
   );
@@ -24,11 +30,20 @@ function performanceEmbed(r) {
   return e;
 }
 
-function leaderboardEmbed(rows, title) {
-  if (!rows.length) return embed(title, 'لا يوجد إداريون مؤهلون للترتيب.', COLORS.gray);
+function leaderboardEmbed(rows, title, days = LEADERBOARD_WINDOW_DAYS) {
+  const unranked = rows.unranked || [];
+  if (!rows.length && !unranked.length) return embed(title, 'لا يوجد إداريون مؤهلون للترتيب.', COLORS.gray);
   const medals = ['🥇', '🥈', '🥉'];
-  return embed(title, rows.slice(0, 20).map((r, idx) => `${medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`} • 🎯 ${r.points}`).join('\n'), COLORS.primary)
-    .setFooter({ text: 'Boss والمجازون مستبعدون • آخر 30 يوم • للإدارة فقط' });
+  const body = rows.length
+    ? rows.slice(0, 20).map((r, idx) => `${medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`} • 🎯 ${r.points}`).join('\n')
+    : '_لا أحد بلغ الحد الأدنى للمشاركة._';
+  const footer = `النافذة: آخر ${days} يوم • بلا حد أدنى للمشاركة: ${unranked.length} • Boss والمجازون مستبعدون`;
+  return embed(title, body, COLORS.primary)
+    .addFields(unranked.length ? [{
+      name: `— بلا تصنيف (${unranked.length}) — أقل من ${LEADERBOARD_MIN_ACTIVE_DAYS} أيام نشاط و0 عنصر عمل`,
+      value: unranked.slice(0, 8).map(r => `• <@${r.staff.user_id}> — ${r.staff.rank} • ${r.raw.activeDays} يوم نشاط`).join('\n') + (unranked.length > 8 ? `\n_… و${unranked.length - 8} آخرين_` : ''),
+    }] : [])
+    .setFooter({ text: footer });
 }
 
 function teamEmbed(teamKey, rows) {
@@ -79,8 +94,8 @@ module.exports = {
       async execute(i) {
         await i.deferReply({ ephemeral: true });
         const team = i.options.getString('team') || 'all';
-        if (team === 'all') return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard('support'), '🏆 ترتيب فريق الدعم الفني'), leaderboardEmbed(reports.leaderboard('moderation'), '🏆 ترتيب فريق الإشراف')] });
-        return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team), `🏆 ترتيب ${TEAMS[team]}`)] });
+        if (team === 'all') return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard('support', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الدعم الفني'), leaderboardEmbed(reports.leaderboard('moderation', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الإشراف')] });
+        return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team, LEADERBOARD_WINDOW_DAYS), `🏆 ترتيب ${TEAMS[team]}`)] });
       },
     },
     {
@@ -96,7 +111,7 @@ module.exports = {
         const s = staffService.get(user.id);
         if (!s) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
         const factor = i.options.getString('factor');
-        staffService.update(user.id, { [factor]: Number(i.options.getString('grade')) });
+        staffService.update(user.id, { [factor]: Number(i.options.getString('grade')), human_ratings_at: nowIso() });
         return replyEphemeral(i, `✅ تم تحديث التقييم لـ <@${user.id}>.`, COLORS.success);
       },
     },

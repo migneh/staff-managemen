@@ -1,7 +1,7 @@
 'use strict';
 const { getDb } = require('../database');
 const { resolveStaff, TEAM_RANKS } = require('./permissions');
-const { nowIso } = require('../utils');
+const { nowIso, today } = require('../utils');
 const settings = require('./settings');
 
 function get(userId) {
@@ -57,6 +57,33 @@ function ensure(member) {
 
 function setStatus(userId, status) {
   getDb().prepare('UPDATE staff_members SET status = ?, updated_at = ? WHERE user_id = ?').run(status, nowIso(), userId);
+}
+
+/** إيقاف مؤقت بتاريخ انتهاء — يمنع بقاء العضو موقوفاً للأبد */
+function suspend(userId, until) {
+  getDb().prepare("UPDATE staff_members SET status = 'suspended', suspended_until = ?, updated_at = ? WHERE user_id = ?")
+    .run(until || null, nowIso(), userId);
+}
+
+/** إلغاء الإيقاف يدوياً (Boss) */
+function unsuspend(userId) {
+  getDb().prepare("UPDATE staff_members SET status = CASE WHEN status = 'suspended' THEN 'active' ELSE status END, suspended_until = NULL, updated_at = ? WHERE user_id = ?")
+    .run(nowIso(), userId);
+}
+
+/** يرفع الإيقاف المنتهي تلقائياً — يعيد قائمة [{user_id, until, rank, team}] لإعلام الفريق */
+function liftExpiredSuspensions(date = today()) {
+  const rows = getDb().prepare("SELECT user_id, suspended_until, rank, team FROM staff_members WHERE status = 'suspended' AND suspended_until IS NOT NULL AND suspended_until <= ?").all(date);
+  const lifted = [];
+  for (const r of rows) {
+    unsuspend(r.user_id);
+    lifted.push({ user_id: r.user_id, until: r.suspended_until, rank: r.rank, team: r.team });
+  }
+  return lifted;
+}
+
+function suspensionEnd(userId) {
+  return getDb().prepare('SELECT suspended_until FROM staff_members WHERE user_id = ?').get(userId)?.suspended_until || null;
 }
 
 function update(userId, fields) {
@@ -145,8 +172,34 @@ async function removeAllStaffRoles(member) {
   try { await member.roles.remove([...ids], 'إزالة الرتب الإدارية عبر Staff Manager'); return true; } catch { return false; }
 }
 
+/**
+ * مزامنة الحالة مع رتب ديسكورد: إن لم يبقَ للعضو أي رتبة إدارية (نُزعت يدوياً
+ * أو خرج من السيرفر) فلا يجوز أن يبقى "active" ويظهر في التقارير إلى الأبد.
+ */
+function syncDeparture(member) {
+  const existing = get(member.id);
+  if (!existing || ['resigned', 'removed'].includes(existing.status)) return null;
+  const info = resolveStaff(member);
+  if (info) return null;
+  // احتفظ بحالة "بإجازة" الصريحة، ونزع البقية إلى "خرج من السيرفر"
+  const next = existing.status === 'on_leave' ? 'on_leave' : 'removed';
+  if (next === existing.status) return null;
+  setStatus(member.id, next);
+  return { previous: existing.status, next, rank: existing.rank, team: existing.team };
+}
+
+/** عند مغادرة السيرفر فعلياً — خروج كامل */
+function markLeft(userId) {
+  const existing = get(userId);
+  if (!existing || ['resigned', 'removed'].includes(existing.status)) return null;
+  setStatus(userId, 'removed');
+  return { previous: existing.status, rank: existing.rank, team: existing.team };
+}
+
 module.exports = {
   get, all, ensure, setStatus, update, touchActivity, setRank,
   applyRankRoles, removeTeamRoles, removeAllStaffRoles,
   vacationRole, addVacationRole, removeVacationRole,
+  suspend, unsuspend, liftExpiredSuspensions, suspensionEnd,
+  syncDeparture, markLeft,
 };

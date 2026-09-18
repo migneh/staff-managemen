@@ -4,8 +4,9 @@ const staffService = require('./staff');
 const score = require('./score');
 const points = require('./points');
 const { hoursSince } = require('../utils');
-const { LEVELS } = require('../constants');
+const { LEVELS, INACTIVE_STATUSES } = require('../constants');
 const { rankInfo } = require('./permissions');
+const logger = require('../logger').log('reports');
 
 /** تقرير فردي كامل */
 function individual(staff, days = 30) {
@@ -28,18 +29,43 @@ function team(teamKey, days = 30) {
   return members.map(m => individual(m, days));
 }
 
-/** Leaderboard (يستبعد Boss والمجازين والموقوفين) */
-function leaderboard(teamKey, days = 30) {
+/**
+ * الترتيب — يستبعد Boss والمجازين والموقوفين والمستقيلين والخارجين.
+ * من لم يسجّل حداً أدنى من المشاركة يُعرض في قائمة «غير مصنّفين» بدل منافسة
+ * من يعمل فعلاً بميداليات (كان أي عضو بلا نشاط يحصل على 🥇 بدرجة 24).
+ */
+const LEADERBOARD_MIN_ACTIVE_DAYS = 3;
+
+function leaderboard(teamKey, days = 30, { includeProbation = false } = {}) {
   const members = staffService.all(teamKey ? { team: teamKey } : {});
-  return members
+  const scored = members
     .filter(m => ['support', 'moderation'].includes(m.team))
     .filter(m => !(m.team === 'support' && rankInfo('support', m.rank)?.level >= LEVELS.BOSS))
-    .filter(m => !['on_leave', 'suspended', 'resigned'].includes(m.status))
+    .filter(m => !INACTIVE_STATUSES.includes(m.status))
+    .filter(m => includeProbation || m.status !== 'probation')
     .map(m => {
       const r = individual(m, days);
-      return { ...r, primary: m.team === 'support' ? r.raw.tickets : r.raw.actions };
-    })
-    .sort((a, b) => b.score - a.score || b.points - a.points || b.primary - a.primary);
+      const primary = m.team === 'support' ? r.raw.tickets : r.raw.actions;
+      const qualified = r.raw.activeDays >= LEADERBOARD_MIN_ACTIVE_DAYS || primary > 0;
+      return { ...r, primary, qualified };
+    });
+
+  const ranked = scored.filter(r => r.qualified).sort((a, b) => b.score - a.score || b.points - a.points || b.primary - a.primary);
+  const unranked = scored.filter(r => !r.qualified).sort((a, b) => b.raw.activeDays - a.raw.activeDays);
+  ranked.unranked = unranked; // يُقرأ في العرض دون كسر التوافق مع المستهلكين الحاليين
+  return ranked;
+}
+
+/** أفضل إداري للشهر: يشترط حداً أدنى — لا جائزة لمن لم يعمل */
+const BEST_OF_MONTH_MIN_SCORE = 70;
+const BEST_OF_MONTH_MIN_WORK = 10;
+
+function bestOfMonth(rows) {
+  const eligible = rows.filter(r => r.staff.rank !== 'Boss' && r.score >= BEST_OF_MONTH_MIN_SCORE && r.primary >= BEST_OF_MONTH_MIN_WORK);
+  if (rows.length && !eligible.length) {
+    logger.warn(`لم يُمنح لقب أفضل إداري: لا أحد حقق الحد الأدنى (Score ${BEST_OF_MONTH_MIN_SCORE}+ و ${BEST_OF_MONTH_MIN_WORK} عنصر عمل)`);
+  }
+  return eligible.sort((a, b) => b.score - a.score)[0] || null;
 }
 
 /** التقرير اليومي */
@@ -47,7 +73,7 @@ function daily() {
   const db = getDb();
   const all = staffService.all();
   const active = all.filter(m => hoursSince(m.last_activity) <= 24).length;
-  const absent = all.filter(m => !['on_leave', 'suspended'].includes(m.status) && hoursSince(m.last_activity) > 72);
+  const absent = all.filter(m => !INACTIVE_STATUSES.includes(m.status) && hoursSince(m.last_activity) > 72);
   const onLeave = all.filter(m => m.status === 'on_leave').length;
   const tickets = db.prepare(`SELECT COUNT(*) c FROM ticket_metrics WHERE closed_at >= datetime('now', '-1 day')`).get().c;
   const actions = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE created_at >= datetime('now', '-1 day')`).get().c;
@@ -67,4 +93,4 @@ function lastSaved(type, period) {
   return r ? JSON.parse(r.data) : null;
 }
 
-module.exports = { individual, team, leaderboard, daily, save, lastSaved };
+module.exports = { individual, team, leaderboard, bestOfMonth, daily, save, lastSaved, LEADERBOARD_MIN_ACTIVE_DAYS, BEST_OF_MONTH_MIN_SCORE, BEST_OF_MONTH_MIN_WORK };

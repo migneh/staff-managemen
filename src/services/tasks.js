@@ -47,8 +47,11 @@ function complete(id, userId) {
   return get(task.id);
 }
 
-function cancel(id, actorId) {
-  return getDb().prepare("UPDATE staff_tasks SET status = 'cancelled' WHERE id = ? AND status = 'pending'").run(Number(id)).changes > 0;
+/** إلغاء مهمة مع تسجيل مَن ألغاها ومتى — كان المعامل actorId مُهمَلاً سابقاً */
+function cancel(id, actorId = null) {
+  const res = getDb().prepare(`UPDATE staff_tasks SET status = 'cancelled', cancelled_by = ?, cancelled_at = ?, updated_at = ?
+    WHERE id = ? AND status = 'pending'`).run(actorId, nowIso(), nowIso(), Number(id));
+  return res.changes > 0;
 }
 
 module.exports = { ensureOnboarding, create, get, list, pendingCount, complete, cancel };

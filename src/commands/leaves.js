@@ -1,6 +1,6 @@
 'use strict';
 const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
-const { LEVELS, LEAVE_TYPES, LEAVE_RULES, LEAVE_GLOBAL } = require('../constants');
+const { LEVELS, LEAVE_TYPES, LEAVE_RULES } = require('../constants');
 const settings = require('../services/settings');
 const { getDb } = require('../database');
 const leaveService = require('../services/leaves');
@@ -186,14 +186,14 @@ module.exports = {
       data: new SlashCommandBuilder().setName('review-leaves').setDescription('مراجعة طلبات الإجازة المعلّقة'),
       level: LEVELS.MANAGEMENT,
       async execute(i) {
-        const { items, total, pages } = leaveService.list({ status: 'pending', perPage: 4, page: 1 });
+        const { total, pages } = leaveService.list({ status: 'pending', perPage: 4, page: 1 });
         if (!total) return replyEphemeral(i, '✅ لا توجد طلبات إجازة معلّقة.', COLORS.success);
         const header = pendingEmbed(1);
         await i.reply({ embeds: header.embeds, ephemeral: true });
         for (const r of header.items) {
-          const cov = leaveService.coverageBetween(r.start_date, r.end_date);
-          const covText = cov.peak >= cov.max ? `⚠️ ممتلئة ${kit.coverageBar(cov.peak, cov.max)}` : `${kit.coverageBar(cov.peak, cov.max)}`;
+              const covText = cov.peak >= cov.max ? `⚠️ ممتلئة ${kit.coverageBar(cov.peak, cov.max)}` : `${kit.coverageBar(cov.peak, cov.max)}`;
           const e = leaveEmbed(r);
+      const cov = leaveService.coverageBetween(r.start_date, r.end_date);
           e.addFields({ name: '👥 التغطية', value: covText, inline: true });
           // زر إلغاء سريع للمعلق
           const row = reviewRow(r.id);
@@ -376,7 +376,6 @@ module.exports = {
       const r = getDb().prepare('SELECT * FROM leave_requests WHERE id = ?').get(Number(id));
       if (!r) return replyEphemeral(i, '❌ الطلب غير موجود.', COLORS.danger);
       const e = leaveEmbed(r);
-      const cov = leaveService.coverageBetween(r.start_date, r.end_date);
       e.addFields(coverageField(r.start_date, r.end_date));
       const gap = leaveService.minGapViolated(r.user_id, r.start_date, r.end_date, r.id);
       if (gap) e.addFields({ name: '⚠️ تداخل الراحة', value: `تحتاج ${gap.required} يوم راحة — لديك ${gap.gap}.` });

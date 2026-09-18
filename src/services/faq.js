@@ -21,7 +21,6 @@ function parseIds(value) {
   if (Array.isArray(value)) return value.map(Number).filter(Number.isInteger);
   try { return JSON.parse(value || '[]').map(Number).filter(Number.isInteger); } catch { return []; }
 }
-function parseCategoryIds(value) { return parseIds(value); }
 
 function normalizeCategoryIds(value) {
   const ids = [...new Set(parseIds(value))].filter(id => category(id));

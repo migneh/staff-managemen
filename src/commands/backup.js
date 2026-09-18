@@ -3,7 +3,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { LEVELS } = require('../constants');
 const backup = require('../services/backup');
 const audit = require('../services/audit');
-const { embed, COLORS, replyEphemeral } = require('../utils');
+const { embed, COLORS } = require('../utils');
 
 module.exports = {
   commands: [

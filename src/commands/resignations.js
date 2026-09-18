@@ -314,7 +314,7 @@ module.exports = {
       confirm.addFields({ name: '📋 تذكير بالتسليم', value: RESIGNATION_GLOBAL.handoverTasks.slice(0, 3).join('\n') });
       return i.reply({ embeds: [confirm, handoverEmbed()], ephemeral: true });
     },
-    'resign:pickwithdraw': async (i, [page]) => {
+    'resign:pickwithdraw': async (i, [_page]) => {
       const id = Number(i.values[0]);
       const r = getDb().prepare("SELECT * FROM resignations WHERE id=? AND user_id=? AND status IN ('pending','on_hold')").get(id, i.user.id);
       if (!r) return replyEphemeral(i, '❌ لا يمكن سحب هذا الطلب.', COLORS.danger);

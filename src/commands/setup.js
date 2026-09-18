@@ -1,25 +1,12 @@
 'use strict';
 const {
   SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
-  ChannelType, PermissionFlagsBits, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
+  ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
-const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, LEAVE_TYPES, LEAVE_RULES, VACATION_ROLE_TIMING } = require('../constants');
+const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, LEAVE_TYPES, CHANNEL_META } = require('../constants');
 const settings = require('../services/settings');
 const { embed, COLORS, replyEphemeral, progressBar } = require('../utils');
 
-const CHANNEL_META = {
-  'staff-faq': { label: 'قاعدة المعرفة', emoji: '📚', desc: 'لوحة FAQ الثابتة' },
-  'staff-updates': { label: 'تحديثات القوانين', emoji: '📢', desc: 'إشعارات تعديل FAQ والترقيات' },
-  'leave-requests': { label: 'طلبات الإجازة', emoji: '🏖️', desc: 'مراجعة الإجازات بالأزرار' },
-  'resignation-requests': { label: 'طلبات الاستقالة', emoji: '📤', desc: 'سري — للإدارة' },
-  'staff-logs': { label: 'سجل العمليات', emoji: '🧾', desc: 'كل عملية يقوم بها البوت' },
-  'performance-reports': { label: 'التقارير', emoji: '📊', desc: 'اليومي/الأسبوعي/الشهري' },
-  'staff-alerts': { label: 'تنبيهات الغياب', emoji: '🚨', desc: 'غياب 96 ساعة + الخاملون' },
-  'ticket-logs': { label: 'سجل التكتات', emoji: '🎫', desc: 'التكتات المسجلة' },
-  'mod-logs': { label: 'سجل الإشراف', emoji: '🛡️', desc: 'الإجراءات الإشرافية' },
-  'manager-review': { label: 'مراجعة الإدارة', emoji: '📈', desc: 'طلبات الترقية' },
-  'ticket-source-logs': { label: 'مصدر سجل التكتات الخارجي', emoji: '🤖', desc: 'القناة التي يرسل فيها بوت التكتات رسالة الإغلاق — اختيارية' },
-};
 const ACTIVITY_META = {
   ticket: { label: 'قنوات التكتات', emoji: '🎫', weight: '50%' },
   staff: { label: 'قنوات الإدارة', emoji: '💬', weight: '25%' },
