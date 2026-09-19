@@ -6,9 +6,11 @@ const modules = [
   require('./help'),
   require('./faq'),
   require('./logging'),
+  require('./appeals'),
   require('./leaves'),
   require('./resignations'),
   require('./records'),
+  require('./recognition'),
   require('./promotions'),
   require('./reports'),
   require('./tasks'),
@@ -122,7 +124,12 @@ const COMPONENT_ACCESS = {
   'promo:reject': { level: LEVELS.MANAGEMENT },        // كان بلا فحص نهائياً
   'promo:rejectmodal': { level: LEVELS.MANAGEMENT },   // وكان يمنح تبريد 30 يوماً لأي عضو
 
-  // ===== المهام والسجل =====
+  // ===== الاستئنافات والتقدير والمهام والسجل =====
+  'appeal:approve': { level: LEVELS.MANAGEMENT, guarded: true },
+  'appeal:reject': { level: LEVELS.MANAGEMENT, guarded: true },
+  'recognition:approve': { level: LEVELS.MANAGEMENT, guarded: true },
+  'recognition:reject': { level: LEVELS.MANAGEMENT, guarded: true },
+  'score:weightsmodal': { level: LEVELS.MANAGEMENT, guarded: true },
   'task:complete': { level: LEVELS.STAFF, owner: 'self' },
 
   // ===== الردود الشخصية من /me و /help =====

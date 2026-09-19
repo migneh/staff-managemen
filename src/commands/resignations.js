@@ -5,6 +5,7 @@ const settings = require('../services/settings');
 const { getDb } = require('../database');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
+const tasks = require('../services/tasks');
 const { embed, COLORS, replyEphemeral, sendToChannel, getChannel, isValidDate, daysBetween, today, dm, log } = require('../utils');
 const kit = require('../ui/kit');
 
@@ -93,6 +94,18 @@ async function decide(i, id, status) {
         roleResult = await staffService.removeVacationRole(member);
         if (staffRoleResult && roleResult.ok) db.prepare("UPDATE resignations SET roles_removed_at = datetime('now') WHERE id = ?").run(r.id);
       }
+    }
+    const existingHandover = tasks.listByType('offboarding', { includeCompleted: true, limit: 200 })
+      .filter(t => t.user_id === r.user_id && t.title.includes(`استقالة #${r.id}`));
+    if (!existingHandover.length) {
+      for (const item of RESIGNATION_GLOBAL.handoverTasks) tasks.create({
+        userId: r.user_id,
+        title: `استقالة #${r.id}: ${item}`,
+        description: `مهمة تسليم مرتبطة بآخر يوم ${r.last_day}. أكملها وارفع أي تفاصيل للإدارة.`,
+        taskType: 'offboarding',
+        dueDate: r.last_day,
+        assignedBy: i.user.id,
+      });
     }
     const when = shouldRemoveNow ? 'تمت إزالة الرتب الإدارية' : `ستُزال رتبك في ${kit.tsDate(removeAt)}`;
     dmEmbed = embed('👋 تم قبول استقالتك', `شكراً لك على كل ما قدمته للفريق. ${when}${roleResult?.ok === false ? '، لكن تعذرت إزالة رتبة الإجازة تلقائياً' : shouldRemoveNow ? ' ورتبة in vacation' : ''}.\n${reason ? `**رسالة الإدارة:** ${reason}` : ''}\n${exitInterview ? `\n**ملاحظة المقابلة:** ${exitInterview}` : ''}\nنتمنى لك التوفيق 🌹`, COLORS.success);

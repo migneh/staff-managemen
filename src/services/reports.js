@@ -14,7 +14,7 @@ function individual(staff, days = 30) {
   const db = getDb();
   const raw = score.monthlyRaw(staff.user_id, days);
   const sc = score.compute(staff, raw);
-  const warns = db.prepare(`SELECT warning_type, COUNT(*) c FROM warnings WHERE user_id = ? AND created_at >= datetime('now', ?) GROUP BY warning_type`).all(staff.user_id, `-${days} days`);
+  const warns = db.prepare(`SELECT warning_type, COUNT(*) c FROM warnings WHERE user_id = ? AND voided_at IS NULL AND created_at >= datetime('now', ?) GROUP BY warning_type`).all(staff.user_id, `-${days} days`);
   const absentDays = Math.max(0, days - raw.activeDays - raw.leaveDays);
   return {
     staff, raw, score: sc.score, factors: sc.factors, assessedMax: sc.assessedMax, grade: score.grade(sc.score),

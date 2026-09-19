@@ -1,16 +1,17 @@
 'use strict';
 const { getDb } = require('../database');
-const { nowIso } = require('../utils');
+const { nowIso, today, addDays } = require('../utils');
 
 function ensureOnboarding(userId) {
   const db = getDb();
   const existing = db.prepare("SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND task_type = 'onboarding'").get(userId).c;
   if (existing) return;
-  const insert = db.prepare('INSERT INTO staff_tasks (user_id, title, description, task_type, assigned_by) VALUES (?, ?, ?, \'onboarding\', ?)');
+  const insert = db.prepare('INSERT INTO staff_tasks (user_id, title, description, task_type, due_date, assigned_by) VALUES (?, ?, ?, \'onboarding\', ?, ?)');
+  const start = today();
   const seed = db.transaction(() => {
-    insert.run(userId, 'قراءة قاعدة المعرفة الأساسية', 'اقرأ القوانين والسياسات المهمة من /faq.', 'system');
-    insert.run(userId, 'قراءة نظام الأداء والترقيات', 'راجع /promotion-info وافهم طريقة احتساب Score والنقاط.', 'system');
-    insert.run(userId, 'تأكيد الجاهزية', 'افتح /my-tasks واضغط زر الإنهاء بعد إنهاء خطوات التأهيل.', 'system');
+    insert.run(userId, 'قراءة قاعدة المعرفة الأساسية', 'اقرأ القوانين والسياسات المهمة من /faq.', addDays(start, 2), 'system');
+    insert.run(userId, 'قراءة نظام الأداء والترقيات', 'راجع /promotion-info وافهم طريقة احتساب Score والنقاط.', addDays(start, 4), 'system');
+    insert.run(userId, 'تأكيد الجاهزية', 'أكمل الخطوتين ثم اضغط زر الإنهاء. بعدها يراجع المدير جاهزيتك قبل التحويل من التجربة إلى نشط.', addDays(start, 7), 'system');
   });
   seed();
 }
@@ -40,6 +41,17 @@ function listByType(taskType, { includeCompleted = false, limit = 50 } = {}) {
     ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?`).all(taskType, safeLimit);
 }
 
+function approveOnboarding(userId, approvedBy) {
+  const db = getDb();
+  const target = db.prepare("SELECT * FROM staff_members WHERE user_id = ? AND status = 'probation'").get(userId);
+  if (!target || !target.onboarding_ready) return null;
+  const pending = db.prepare("SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND task_type = 'onboarding' AND status = 'pending'").get(userId).c;
+  if (pending) return null;
+  db.prepare("UPDATE staff_members SET status = 'active', onboarding_ready = 0, onboarding_approved_by = ?, onboarding_approved_at = ?, updated_at = ? WHERE user_id = ?")
+    .run(approvedBy || null, nowIso(), nowIso(), userId);
+  return db.prepare('SELECT * FROM staff_members WHERE user_id = ?').get(userId);
+}
+
 function complete(id, userId) {
   const db = getDb();
   const task = db.prepare("SELECT * FROM staff_tasks WHERE id = ? AND user_id = ? AND status = 'pending' AND task_type != 'points_appeal'").get(Number(id), userId);
@@ -48,7 +60,7 @@ function complete(id, userId) {
     .run(nowIso(), nowIso(), task.id);
   if (task.task_type === 'onboarding') {
     const remaining = db.prepare("SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND task_type = 'onboarding' AND status = 'pending'").get(userId).c;
-    if (!remaining) db.prepare("UPDATE staff_members SET status = CASE WHEN status = 'probation' THEN 'active' ELSE status END, updated_at = ? WHERE user_id = ?").run(nowIso(), userId);
+    if (!remaining) db.prepare("UPDATE staff_members SET onboarding_ready = 1, updated_at = ? WHERE user_id = ?").run(nowIso(), userId);
   }
   return get(task.id);
 }
@@ -60,4 +72,4 @@ function cancel(id, actorId = null) {
   return res.changes > 0;
 }
 
-module.exports = { ensureOnboarding, create, get, list, listByType, pendingCount, complete, cancel };
+module.exports = { ensureOnboarding, create, get, list, listByType, pendingCount, approveOnboarding, complete, cancel };

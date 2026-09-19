@@ -8,7 +8,7 @@ const fileConfig = require('../config');
 const logger = require('../logger').log('settings');
 const {
   SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, LEAVE_GLOBAL, LEAVE_RULES, RESIGNATION_GLOBAL, VACATION_ROLE_TIMING,
-  CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS, CHANNEL_META,
+  CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS, CHANNEL_META, SCORE_WEIGHTS,
 } = require('../constants');
 
 let cache = null;
@@ -66,7 +66,7 @@ function load() {
   }
   // تنظيف القيم الوهمية
   for (const t of Object.keys(cache.roles)) for (const k of Object.keys(cache.roles[t])) if (cache.roles[t][k] === 'ROLE_ID') delete cache.roles[t][k];
-  for (const k of Object.keys(cache.channels)) if (cache.channels[k] === 'CHANNEL_ID') delete cache.channels[k];
+  for (const k of Object.keys(cache.channels)) if (['CHANNEL_ID', 'OPTIONAL_CHANNEL_ID'].includes(cache.channels[k])) delete cache.channels[k];
   for (const k of Object.keys(cache.activityChannels)) if (!Array.isArray(cache.activityChannels[k])) delete cache.activityChannels[k];
   for (const k of ['ticket', 'staff', 'moderation']) cache.activityChannels[k] = (cache.activityChannels[k] || []).filter(x => /^\d+$/.test(x));
   return cache;
@@ -90,6 +90,24 @@ function policy(key, fallback = null) {
   return value === undefined || value === null || value === '' ? fallback : value;
 }
 function setPolicy(key, value) { set(`policy.${key}`, value); }
+
+function scoreWeights(team) {
+  const key = team === 'support' ? 'support' : team === 'moderation' ? 'moderation' : 'helper';
+  const fallback = SCORE_WEIGHTS[key];
+  const configured = policy('scoreWeights', {});
+  const candidate = configured?.[key];
+  const keys = Object.keys(fallback);
+  if (!candidate || keys.some(name => !Object.prototype.hasOwnProperty.call(candidate, name)) || Object.keys(candidate).some(name => !keys.includes(name)) || Object.values(candidate).some(v => !Number.isInteger(Number(v)) || Number(v) < 0) || keys.reduce((sum, name) => sum + Number(candidate[name]), 0) !== 100) return { ...fallback };
+  return Object.fromEntries(Object.entries(fallback).map(([name, value]) => [name, Number(candidate[name] ?? value)]));
+}
+
+function setScoreWeights(team, values) {
+  const key = team === 'support' ? 'support' : team === 'moderation' ? 'moderation' : 'helper';
+  const next = { ...(policy('scoreWeights', {}) || {}), [key]: values };
+  setPolicy('scoreWeights', next);
+  return scoreWeights(key);
+}
+
 function resetPolicy(key) {
   ensureTable();
   getDb().prepare('DELETE FROM settings WHERE key = ?').run(`policy.${key}`);
@@ -167,6 +185,6 @@ function status() {
 module.exports = {
   load, set, setRole, setGovernanceRole, setChannel, setActivity, setTicketLogBotId,
   roles, channels, activityChannels, roleId, channelId, ticketLogBotId, governanceRoleId, vacationRoleId, status,
-  policy, setPolicy, resetPolicy, leavePolicy, resignationPolicy, VACATION_ROLE_TIMING,
+  policy, setPolicy, resetPolicy, scoreWeights, setScoreWeights, leavePolicy, resignationPolicy, VACATION_ROLE_TIMING,
   CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS, CHANNEL_META,
 };

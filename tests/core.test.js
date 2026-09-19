@@ -282,14 +282,16 @@ describe('الإعدادات (/setup)', () => {
 });
 
 describe('مهام التأهيل', () => {
-  test('تُنهي فترة التجربة بعد إكمال المهام الثلاث', () => {
+  test('تحتاج اكتمال المهام ثم اعتماداً بشرياً قبل النشاط', () => {
     const tasks = require('../src/services/tasks');
     const db = getDb();
     db.prepare("INSERT INTO staff_members (user_id, username, team, rank, status) VALUES ('new', 'new', 'support', 'Helper', 'probation')").run();
     tasks.ensureOnboarding('new');
     assert.equal(tasks.list('new').length, 3);
     for (const task of tasks.list('new')) assert.ok(tasks.complete(task.id, 'new'));
-    assert.equal(db.prepare("SELECT status FROM staff_members WHERE user_id = 'new'").get().status, 'active');
+    assert.equal(db.prepare("SELECT status, onboarding_ready FROM staff_members WHERE user_id = 'new'").get().status, 'probation');
+    assert.equal(tasks.approveOnboarding('new', 'manager').status, 'active');
+    assert.equal(db.prepare("SELECT onboarding_approved_by FROM staff_members WHERE user_id = 'new'").get().onboarding_approved_by, 'manager');
   });
 });
 

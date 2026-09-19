@@ -8,9 +8,15 @@ const { openMemoryDb, getDb } = require('../src/database');
 const score = require('../src/services/score');
 const load = require('../src/services/load');
 const reports = require('../src/services/reports');
+const settings = require('../src/services/settings');
 const points = require('../src/services/points');
 const taskService = require('../src/services/tasks');
+const scheduler = require('../src/scheduler');
+const recognition = require('../src/commands/recognition');
+const appeals = require('../src/commands/appeals');
 const health = require('../src/health');
+const { RESIGNATION_GLOBAL } = require('../src/constants');
+const { today } = require('../src/utils');
 
 function seedStaff(id, team, rank, status = 'active') {
   getDb().prepare(`INSERT INTO staff_members (user_id, username, team, rank, status) VALUES (?, ?, ?, ?, ?)`)
@@ -35,6 +41,60 @@ describe('المرحلة 3 — شفافية وتقارير العمل', () => {
     const trend = reports.personalTrend(staff);
     assert.equal(trend.currentActiveDays, 1);
     assert.equal(trend.previousActiveDays, 1);
+  });
+
+  test('يطبق أوزان Score المخصصة مع مجموع ثابت من 100', () => {
+    const staff = seedStaff('weighted', 'support', 'Support');
+    settings.setScoreWeights('support', { tickets: 50, speed: 10, chat: 20, presence: 20 });
+    const result = score.compute(staff, { messages: 200, activeDays: 26, tickets: 50, avgDuration: 4, avgRating: 4.6 });
+    assert.deepEqual(result.factors.map(f => f.max), [50, 10, 20, 20]);
+    assert.equal(result.assessedMax, 100);
+    assert.equal(result.score, 100);
+  });
+
+  test('يرسل تذكير التأهيل مرة واحدة ويميز المهمة عند نجاح الرسالة', async () => {
+    const task = taskService.create({ userId: 'reminder', title: 'مهمة موعدها اليوم', taskType: 'onboarding', dueDate: today(), assignedBy: 'system' });
+    const sent = [];
+    const client = { users: { fetch: async () => ({ send: async payload => sent.push(payload) }) } };
+    assert.equal(await scheduler.processTaskReminders(client), 1);
+    assert.equal(sent.length, 1);
+    assert.ok(taskService.get(task.id).reminder_sent_at);
+    assert.equal(await scheduler.processTaskReminders(client), 0);
+  });
+
+  test('ينشئ مهام تسليم مرتبطة بآخر يوم الاستقالة', () => {
+    const tasks = RESIGNATION_GLOBAL.handoverTasks.map(title => taskService.create({ userId: 'offboard', title: `استقالة #7: ${title}`, taskType: 'offboarding', dueDate: '2026-09-30', assignedBy: 'manager' }));
+    assert.equal(tasks.length, RESIGNATION_GLOBAL.handoverTasks.length);
+    assert.deepEqual(taskService.listByType('offboarding').map(t => t.due_date), tasks.map(() => '2026-09-30'));
+  });
+
+  test('يعتمد ترشيح التقدير ويمنح نقاطه مرة واحدة', async () => {
+    seedStaff('nominator', 'support', 'Support');
+    seedStaff('winner', 'support', 'Support');
+    const result = getDb().prepare('INSERT INTO recognition_nominations (nominator_id, target_id, reason) VALUES (?, ?, ?)').run('nominator', 'winner', 'حل مشكلة صعبة');
+    const client = { users: { fetch: async () => ({ send: async () => {} }) } };
+    const interaction = { user: { id: 'manager' }, channelId: 'review', client, update: async () => {} };
+    await recognition.components['recognition:approve'](interaction, [String(result.lastInsertRowid)]);
+    const nomination = getDb().prepare('SELECT * FROM recognition_nominations WHERE id = ?').get(result.lastInsertRowid);
+    assert.equal(nomination.status, 'approved');
+    assert.equal(nomination.points_awarded, 5);
+    assert.equal(getDb().prepare("SELECT SUM(points) total FROM promotion_points WHERE user_id = 'winner'").get().total, 5);
+  });
+
+  test('يقبل استئناف الإنذار ويلغي أثره من العد والنقاط', async () => {
+    seedStaff('warned', 'moderation', 'Moderator');
+    const warning = getDb().prepare('INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES (?, ?, ?, ?)').run('warned', 'formal', 'سبب', 'manager');
+    const ledger = points.add('warned', 'formal_warning', 'moderation', { refType: 'warning', refId: warning.lastInsertRowid, addedBy: 'manager' });
+    const appeal = getDb().prepare('INSERT INTO warning_appeals (warning_id, user_id, reason) VALUES (?, ?, ?)').run(warning.lastInsertRowid, 'warned', 'لدي دليل');
+    const client = { users: { fetch: async () => ({ send: async () => {} }) } };
+    const interaction = { user: { id: 'manager-2' }, channelId: 'review', client, update: async () => {} };
+    await appeals.components['appeal:approve'](interaction, [String(appeal.lastInsertRowid)]);
+    const row = getDb().prepare('SELECT * FROM warnings WHERE id = ?').get(warning.lastInsertRowid);
+    const reviewed = getDb().prepare('SELECT * FROM warning_appeals WHERE id = ?').get(appeal.lastInsertRowid);
+    assert.ok(row.voided_at);
+    assert.equal(reviewed.status, 'approved');
+    assert.equal(score.monthlyRaw('warned').warnings, 0);
+    assert.equal(points.total('warned'), ledger + (-ledger));
   });
 
   test('يحفظ اعتراض النقاط كمهمة إدارة ولا يظهر كمهمة عادية للعضو', () => {
@@ -68,6 +128,13 @@ describe('المرحلة 3 — شفافية وتقارير العمل', () => {
 });
 
 describe('المرحلة 4 — التشغيل والمراقبة', () => {
+  test('يبقي قناة staff-wins اختيارية ولا يخفض اكتمال الإعداد', () => {
+    assert.equal(settings.CHANNEL_KEYS.includes('staff-wins'), false);
+    settings.setChannel('staff-wins', '123456');
+    assert.equal(settings.channelId('staff-wins'), '123456');
+    assert.equal(settings.status().channelsTotal, settings.CHANNEL_KEYS.length);
+  });
+
   test('يعرض healthz وmetrics حالة المهام وقاعدة البيانات', () => {
     const scheduler = { status: () => ({ daily: { finishedAt: '2026-09-18 09:00:00', ok: true, error: null } }) };
     const snapshot = health.snapshot(scheduler);

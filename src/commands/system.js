@@ -15,6 +15,7 @@ const JOB_LABELS = {
   suspensions: 'رفع الإيقاف المنتهي',
   leaves: 'الإجازات',
   resignations: 'الاستقالات',
+  'task-reminders': 'تذكيرات المهام',
   backup: 'النسخ الاحتياطي',
   'daily-report': 'التقرير اليومي',
   'weekly-report': 'التقرير الأسبوعي',

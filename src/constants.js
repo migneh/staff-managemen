@@ -75,10 +75,11 @@ const CHANNEL_META = {
   'ticket-logs': { label: 'سجل التكتات', emoji: '🎫', desc: 'التكتات المسجلة' },
   'mod-logs': { label: 'سجل الإشراف', emoji: '🛡️', desc: 'الإجراءات الإشرافية' },
   'manager-review': { label: 'مراجعة الإدارة', emoji: '📈', desc: 'طلبات الترقية' },
+  'staff-wins': { label: 'إنجازات الفريق', emoji: '🏆', desc: 'ترشيحات وتقدير الزملاء — اختيارية' },
   'ticket-source-logs': { label: 'مصدر سجل التكتات الخارجي', emoji: '🤖', desc: 'القناة التي يرسل فيها بوت التكتات رسالة الإغلاق — اختيارية' },
 };
-const CHANNEL_KEYS = Object.keys(CHANNEL_META).filter(k => k !== 'ticket-source-logs');
-const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs'];
+const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs', 'staff-wins'];
+const CHANNEL_KEYS = Object.keys(CHANNEL_META).filter(k => !OPTIONAL_CHANNEL_KEYS.includes(k));
 
 // ===== تصنيفات FAQ =====
 const FAQ_CATEGORIES = [
@@ -179,6 +180,7 @@ const POINTS = {
   week_above_80: { label: 'أسبوع Score فوق 80', all: 10 },
   week_below_50: { label: 'أسبوع Score تحت 50', all: -10 },
   helped_newbie: { label: 'مساعدة عضو جديد', all: 15 },
+  shoutout: { label: 'تقدير من زميل', all: 5 },
   complex_case: { label: 'حل تكت/حالة معقدة', all: 10 },
   positive_note: { label: 'ملاحظة إيجابية', all: 5 },
   negative_note: { label: 'ملاحظة سلبية', all: -10 },
@@ -269,11 +271,18 @@ const PROBATION = {
   minTicketsForRating: 5,    // لا نُقيّم المتوسط قبل هذا العدد من التكتات
 };
 
+// أوزان Score قابلة للضبط — مجموع كل فريق يجب أن يساوي 100.
+const SCORE_WEIGHTS = {
+  helper: { chat: 25, presence: 25, teamInteraction: 25, supervisorRating: 25 },
+  support: { tickets: 30, speed: 25, chat: 25, presence: 20 },
+  moderation: { actions: 30, speed: 25, activity: 25, commitment: 20 },
+};
+
 
 module.exports = {
   LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, STATUS, INACTIVE_STATUSES, FAQ_CATEGORIES,
   CHANNEL_META, CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS,
   ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, LEAVE_RULES, LEAVE_GLOBAL, VACATION_ROLE_TIMING,
   RESIGNATION_REASONS, RESIGNATION_GLOBAL, MOD_ACTION_TYPES,
-  NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS, PROBATION,
+  NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS, PROBATION, SCORE_WEIGHTS,
 };

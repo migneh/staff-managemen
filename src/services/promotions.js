@@ -66,7 +66,7 @@ function evaluate(staff) {
   const months = clock.monthsSince(staff.rank_since);
   const cd = points.activeCooldown(staff.user_id);
 
-  const warnCount = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND date(created_at) >= ? AND warning_type != 'verbal'`).get(staff.user_id, warnSince).c;
+  const warnCount = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND voided_at IS NULL AND date(created_at) >= ? AND warning_type != 'verbal'`).get(staff.user_id, warnSince).c;
   const wrongDecisions = db.prepare(`SELECT COUNT(*) c FROM promotion_points WHERE user_id = ? AND reason_key = 'wrong_decision' AND date(created_at) >= ?`).get(staff.user_id, since).c;
   const helpedNewbie = db.prepare(`SELECT COUNT(*) c FROM promotion_points WHERE user_id = ? AND reason_key = 'helped_newbie' AND date(created_at) >= ?`).get(staff.user_id, since).c;
 
