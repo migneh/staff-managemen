@@ -16,7 +16,7 @@ function recordEmbed(userId, { includeSecret }) {
     .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
   // ===== تاريخ الرتب: من رقّى مَن ومتى (ROADMAP 2.1) =====
   const RANK_CHANGE = {
-    promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين',
+    promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين', reinstate: '↩️ إعادة تفعيل',
     remove: '🚪 إزالة', left_guild: '👋 مغادرة السيرفر',
   };
   const rankRows = staffService.rankHistory(userId, 5);
@@ -33,7 +33,7 @@ function recordEmbed(userId, { includeSecret }) {
   }
   e.addFields({
     name: `⚠️ الإنذارات (${warns.length})`,
-    value: warns.length ? warns.map(w => `${WARNING_TYPES[w.warning_type]?.emoji} **${WARNING_TYPES[w.warning_type]?.label}** — ${w.reason} • ${discordTs(w.created_at, 'd')} • <@${w.issued_by}>`).join('\n').slice(0, 1024) : 'لا يوجد',
+    value: warns.length ? warns.map(w => `${WARNING_TYPES[w.warning_type]?.emoji} **#${w.id} ${WARNING_TYPES[w.warning_type]?.label}**${w.voided_at ? ' ⚖️ ملغى بالاستئناف' : ''} — ${w.reason} • ${discordTs(w.created_at, 'd')} • <@${w.issued_by}>`).join('\n').slice(0, 1024) : 'لا يوجد',
   }, {
     name: `📝 الملاحظات (${notes.length})`,
     value: notes.length ? notes.map(n => `${NOTE_TYPES[n.note_type]?.emoji}${n.is_secret ? '🔒' : ''} ${n.content} • ${discordTs(n.created_at, 'd')}`).join('\n').slice(0, 1024) : 'لا يوجد',

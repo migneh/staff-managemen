@@ -39,6 +39,7 @@
     "ticket-logs": "CHANNEL_ID",
     "mod-logs": "CHANNEL_ID",
     "manager-review": "CHANNEL_ID",
+    "staff-wins": "OPTIONAL_CHANNEL_ID",
     "ticket-source-logs": "CHANNEL_ID"
   },
   "ticketLogBotId": "OPTIONAL_BOT_ID",

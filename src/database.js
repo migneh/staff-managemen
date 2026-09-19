@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS staff_members (
   supervisor_rating INTEGER,     -- تقييم المشرف (5-25)
   team_interaction INTEGER,      -- التفاعل مع الفريق (5-25)
   response_speed INTEGER,        -- سرعة الاستجابة للإشراف (5-25)
+  onboarding_ready INTEGER NOT NULL DEFAULT 0,
+  onboarding_approved_by TEXT,
+  onboarding_approved_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -168,8 +171,25 @@ CREATE TABLE IF NOT EXISTS warnings (
   warning_type TEXT NOT NULL,
   reason TEXT NOT NULL,
   issued_by TEXT NOT NULL,
+  voided_at TEXT,
+  voided_by TEXT,
+  void_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_warnings_user ON warnings(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS warning_appeals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  warning_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  reviewed_by TEXT,
+  review_reason TEXT,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_warning_appeals_status ON warning_appeals(status, created_at);
 
 CREATE TABLE IF NOT EXISTS staff_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,6 +200,19 @@ CREATE TABLE IF NOT EXISTS staff_notes (
   added_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS recognition_nominations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nominator_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  reviewed_by TEXT,
+  reviewed_at TEXT,
+  points_awarded INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_recognition_status ON recognition_nominations(status, created_at);
 
 CREATE TABLE IF NOT EXISTS faq_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -331,6 +364,7 @@ CREATE TABLE IF NOT EXISTS staff_tasks (
   status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | cancelled
   assigned_by TEXT,
   completed_at TEXT,
+  reminder_sent_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -401,9 +435,10 @@ function migrate(database) {
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_source_message ON ticket_metrics(source_message_id) WHERE source_message_id IS NOT NULL');
 
   // عمود الإيقاف المؤقت: يمنع بقاء العضو موقوفاً للأبد (كان لا يوجد مسار إلغاء إيقاف)
-  addTableColumns('staff_members', [['suspended_until', 'TEXT']]);
+  addTableColumns('staff_members', [['suspended_until', 'TEXT'], ['onboarding_ready', 'INTEGER NOT NULL DEFAULT 0'], ['onboarding_approved_by', 'TEXT'], ['onboarding_approved_at', 'TEXT']]);
+  addTableColumns('warnings', [['voided_at', 'TEXT'], ['voided_by', 'TEXT'], ['void_reason', 'TEXT']]);
   addTableColumns('ticket_metrics', [['duration_source', 'TEXT'], ['claimed_at', 'TEXT']]);
-  addTableColumns('staff_tasks', [['cancelled_by', 'TEXT'], ['cancelled_at', 'TEXT']]);
+  addTableColumns('staff_tasks', [['cancelled_by', 'TEXT'], ['cancelled_at', 'TEXT'], ['reminder_sent_at', 'TEXT']]);
   // تاريخ آخر تقييم بشري: يمنع الاعتماد على تقييم قديم لا يصف الحاضر
   addTableColumns('staff_members', [['human_ratings_at', 'TEXT']]);
   // «عصر» النقاط: كل رتبة عصر مستقل، فتصفير النقاط بعد الترقية لا يحتاج صفاً سلبياً مزيفاً

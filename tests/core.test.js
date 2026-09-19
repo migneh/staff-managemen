@@ -215,6 +215,15 @@ describe('دورة الإجازات والاستقالات', () => {
 });
 
 describe('التقارير والـ Leaderboard', () => {
+  test('جائزة الشهر لا تُمنح بلا عمل أو أثناء الإجازة', () => {
+    const rows = [
+      { staff: { user_id: 'idle', team: 'support', rank: 'Support', status: 'active' }, score: 95, raw: { tickets: 0 } },
+      { staff: { user_id: 'working', team: 'support', rank: 'Support', status: 'active' }, score: 80, raw: { tickets: 10 } },
+      { staff: { user_id: 'leave', team: 'support', rank: 'Support', status: 'on_leave' }, score: 100, raw: { tickets: 50 } },
+    ];
+    assert.equal(reports.bestOfMonth(rows).staff.user_id, 'working');
+  });
+
   test('يستبعد Boss والمجازين', () => {
     seedStaff('b', 'support', 'Boss');
     seedStaff('l', 'support', 'Support', { status: 'on_leave' });
@@ -273,14 +282,16 @@ describe('الإعدادات (/setup)', () => {
 });
 
 describe('مهام التأهيل', () => {
-  test('تُنهي فترة التجربة بعد إكمال المهام الثلاث', () => {
+  test('تحتاج اكتمال المهام ثم اعتماداً بشرياً قبل النشاط', () => {
     const tasks = require('../src/services/tasks');
     const db = getDb();
     db.prepare("INSERT INTO staff_members (user_id, username, team, rank, status) VALUES ('new', 'new', 'support', 'Helper', 'probation')").run();
     tasks.ensureOnboarding('new');
     assert.equal(tasks.list('new').length, 3);
     for (const task of tasks.list('new')) assert.ok(tasks.complete(task.id, 'new'));
-    assert.equal(db.prepare("SELECT status FROM staff_members WHERE user_id = 'new'").get().status, 'active');
+    assert.equal(db.prepare("SELECT status, onboarding_ready FROM staff_members WHERE user_id = 'new'").get().status, 'probation');
+    assert.equal(tasks.approveOnboarding('new', 'manager').status, 'active');
+    assert.equal(db.prepare("SELECT onboarding_approved_by FROM staff_members WHERE user_id = 'new'").get().onboarding_approved_by, 'manager');
   });
 });
 
@@ -311,6 +322,9 @@ describe('استيراد سجل التكتات الخارجي', () => {
     assert.equal(ticketLogs.parseDuration(''), null);
     const second = ticketLogs.recordTicket(parsed);
     assert.equal(second.duplicate, true);
+    const manualFallback = ticketLogs.recordTicket({ ...parsed, source: 'manual', sourceMessageId: null });
+    assert.equal(manualFallback.duplicate, true);
+    assert.equal(manualFallback.manualDuplicate, true);
     assert.equal(getDb().prepare('SELECT COUNT(*) c FROM ticket_metrics').get().c, 1);
   });
 });

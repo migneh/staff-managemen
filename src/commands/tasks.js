@@ -14,7 +14,7 @@ function taskPayload(userId, includeCompleted = false) {
   const buttons = rows.filter(t => t.status === 'pending').slice(0, 10).map(t => new ButtonBuilder().setCustomId(`task:complete:${t.id}`).setLabel(`إنهاء #${t.id}`).setEmoji('✅').setStyle(ButtonStyle.Success));
   const components = [];
   for (let i = 0; i < buttons.length; i += 5) components.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-  return { embeds: [embed('📋 مهامي', lines.join('\n\n'), COLORS.info).setFooter({ text: 'أكمل مهام التأهيل الثلاث للانتقال تلقائياً من التجربة إلى نشط.' })], components };
+  return { embeds: [embed('📋 مهامي', lines.join('\n\n'), COLORS.info).setFooter({ text: 'بعد إكمال مهام التأهيل الثلاث يراجع المدير جاهزيتك قبل اعتماد الحالة النشطة.' })], components };
 }
 
 module.exports = {
@@ -23,6 +23,25 @@ module.exports = {
       data: new SlashCommandBuilder().setName('my-tasks').setDescription('عرض مهامك ومهام التأهيل'),
       level: LEVELS.STAFF,
       async execute(i) { return i.reply({ ...taskPayload(i.user.id), ephemeral: true }); },
+    },
+    {
+      data: new SlashCommandBuilder().setName('approve-onboarding').setDescription('اعتماد انتقال إداري من التجربة إلى نشط')
+        .addUserOption(o => o.setName('user').setDescription('الإداري الجديد').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('ملاحظة المدير — اختيارية').setMaxLength(300)),
+      level: LEVELS.MANAGEMENT,
+      async execute(i) {
+        const user = i.options.getUser('user');
+        const target = staffService.get(user.id);
+        if (!target || target.status !== 'probation') return replyEphemeral(i, '❌ العضو غير موجود أو ليس في فترة تجريبية.', COLORS.danger);
+        const pending = tasks.list(user.id, { limit: 20 }).filter(t => t.task_type === 'onboarding' && t.status === 'pending');
+        if (pending.length || !target.onboarding_ready) return replyEphemeral(i, `❌ لم تكتمل مهام التأهيل بعد.${pending.length ? `\nالمتبقي: ${pending.map(t => `#${t.id}`).join('، ')}` : ''}`, COLORS.danger);
+        const reason = i.options.getString('reason') || null;
+        const approved = tasks.approveOnboarding(user.id, i.user.id);
+        if (!approved) return replyEphemeral(i, '❌ تعذّر اعتماد التأهيل — أعد فتح /my-tasks وتحقق من اكتمال المهام.', COLORS.danger);
+        audit.record({ action: 'onboarding_approved', actorId: i.user.id, targetId: user.id, details: { reason }, channelId: i.channelId });
+        await require('../utils').dm(i.client, user.id, { embeds: [embed('🎉 تم اعتمادك كإداري نشط', `اعتمدت الإدارة انتقالك من فترة التجربة إلى **نشط**.${reason ? `\n**ملاحظة:** ${reason}` : ''}`, COLORS.success)] });
+        return replyEphemeral(i, `✅ تم اعتماد <@${user.id}> كإداري نشط.`, COLORS.success);
+      },
     },
     {
       data: new SlashCommandBuilder().setName('assign-task').setDescription('تعيين مهمة لإداري')

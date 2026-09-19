@@ -6,7 +6,7 @@ const { getDb } = require('../database');
 const leaveService = require('../services/leaves');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
-const { embed, COLORS, replyEphemeral, sendToChannel, getChannel, isValidDate, today, dm, log } = require('../utils');
+const { embed, COLORS, replyEphemeral, sendToChannel, getChannel, isValidDate, today, addDays, dm, log } = require('../utils');
 const kit = require('../ui/kit');
 
 const STATUS_AR = { pending: '⏳ معلّق', approved: '✅ معتمد', rejected: '❌ مرفوض', ended: '🏁 منتهي', cancelled: '🚫 ملغى' };
@@ -40,6 +40,18 @@ function coverageField(start, end) {
   const bar = kit.coverageBar(cov.peak, cov.max);
   const day = cov.peakDay !== start ? ` (ذروة ${kit.tsDate(cov.peakDay)})` : '';
   return { name: `👥 التغطية خلال الفترة`, value: `${bar}${day}\n${cov.peak >= cov.max ? '⚠️ الفترة ممتلئة — قد يُرفض الطلب' : cov.peak >= cov.max - 1 ? '🟡 الفترة شبه ممتلئة' : '✅ توجد سعة'}` };
+}
+
+function calendarEmbed(start, days) {
+  const lines = [];
+  for (let i = 0; i < days; i++) {
+    const date = addDays(start, i);
+    const cov = leaveService.coverageFor(date);
+    const people = cov.rows.length ? cov.rows.map(r => `<@${r.user_id}> (${LEAVE_TYPES[r.leave_type] || r.leave_type})`).join('، ').slice(0, 450) : 'لا أحد';
+    lines.push(`**${kit.tsDate(date)}** ${kit.coverageBar(cov.count, cov.max)} • ${cov.count}/${cov.max}\n${people}`);
+  }
+  return embed(`🗓️ تقويم الإجازات — ${kit.tsDate(start)} → ${kit.tsDate(addDays(start, days - 1))}`, lines.join('\n\n').slice(0, 4000), COLORS.info)
+    .setFooter({ text: 'التغطية محسوبة من الإجازات المعتمدة فقط • استخدم /request-leave لرؤية التوقع قبل الإرسال.' });
 }
 
 const reviewRow = (id) => new ActionRowBuilder().addComponents(
@@ -191,9 +203,9 @@ module.exports = {
         const header = pendingEmbed(1);
         await i.reply({ embeds: header.embeds, ephemeral: true });
         for (const r of header.items) {
-              const covText = cov.peak >= cov.max ? `⚠️ ممتلئة ${kit.coverageBar(cov.peak, cov.max)}` : `${kit.coverageBar(cov.peak, cov.max)}`;
+          const cov = leaveService.coverageBetween(r.start_date, r.end_date);
+          const covText = cov.peak >= cov.max ? `⚠️ ممتلئة ${kit.coverageBar(cov.peak, cov.max)}` : `${kit.coverageBar(cov.peak, cov.max)}`;
           const e = leaveEmbed(r);
-      const cov = leaveService.coverageBetween(r.start_date, r.end_date);
           e.addFields({ name: '👥 التغطية', value: covText, inline: true });
           // زر إلغاء سريع للمعلق
           const row = reviewRow(r.id);
@@ -271,6 +283,18 @@ module.exports = {
         audit.record({ action: 'leave_ended_early', actorId: i.user.id, targetId: user.id, details: { requestId: r.id, reason }, channelId: i.channelId });
         await log(i.client, '🏁 إنهاء إجازة مبكر', `<@${user.id}> — #${r.id} بواسطة <@${i.user.id}>\n${reason}`, COLORS.info);
         return replyEphemeral(i, `✅ تم إنهاء إجازة <@${user.id}>.`, COLORS.success);
+      },
+    },
+    {
+      data: new SlashCommandBuilder().setName('leave-calendar').setDescription('تقويم الإجازات والتغطية للأيام القادمة')
+        .addStringOption(o => o.setName('start').setDescription('بداية YYYY-MM-DD (افتراضي: اليوم)').setRequired(false))
+        .addIntegerOption(o => o.setName('days').setDescription('عدد الأيام (1-14)').setMinValue(1).setMaxValue(14).setRequired(false)),
+      level: LEVELS.STAFF,
+      async execute(i) {
+        const start = i.options.getString('start') || today();
+        const days = i.options.getInteger('days') || 14;
+        if (!isValidDate(start)) return replyEphemeral(i, '❌ صيغة التاريخ غير صحيحة.', COLORS.danger);
+        return i.reply({ embeds: [calendarEmbed(start, days)], ephemeral: true });
       },
     },
     {

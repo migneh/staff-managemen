@@ -29,8 +29,15 @@ function ticketEmbed(result, loggedBy, sourceLabel = 'يدوي') {
 
 async function saveTicket(i, input, sourceLabel = 'يدوي') {
   const result = ticketLogs.recordTicket(input);
-  if (result.duplicate) return replyEphemeral(i, 'ℹ️ هذا السجل الخارجي تم احتسابه مسبقاً، ولن تُضاف نقاط مكررة.', COLORS.info);
-  audit.record({ action: 'ticket_logged', actorId: i.user.id, targetId: input.claimer, details: { ticketId: input.ticketId, source: input.source || 'manual', rowId: result.row.id }, channelId: i.channelId });
+  if (result.duplicate) return replyEphemeral(i, result.manualDuplicate
+    ? 'ℹ️ هذا الرقم مسجل مسبقاً، ولن تُضاف نقاط مكررة. إذا أُعيد فتح التكت فليُسجّل من سجل البوت الخارجي.'
+    : 'ℹ️ هذا السجل الخارجي تم احتسابه مسبقاً، ولن تُضاف نقاط مكررة.', COLORS.info);
+  audit.record({ action: 'ticket_logged', actorId: i.user.id, targetId: input.claimer, details: {
+    ticketId: input.ticketId,
+    source: input.source || 'manual',
+    rowId: result.row.id,
+    manualOverride: input.source === 'manual' && input.claimer !== i.user.id,
+  }, channelId: i.channelId });
   const e = ticketEmbed(result, i.user.id, sourceLabel);
   await sendToChannel(i.client, 'ticket-logs', { embeds: [e] });
   return i.reply({ embeds: [e], ephemeral: true });
@@ -84,6 +91,9 @@ module.exports = {
       if (!ID_RE.test(owner) || !ID_RE.test(claimer) || !ID_RE.test(closer)) return replyEphemeral(i, '❌ معرفات الأعضاء غير صحيحة.', COLORS.danger);
       const rating = ratingRaw ? Number(ratingRaw) : null;
       if (rating != null && !(rating >= 1 && rating <= 5)) return replyEphemeral(i, '❌ التقييم يجب أن يكون بين 1 و 5.', COLORS.danger);
+      if (claimer !== i.user.id && i.staffLevel < LEVELS.SUPERVISOR) {
+        return replyEphemeral(i, '❌ لا يمكنك تسجيل تكت باسم إداري آخر. هذه الصلاحية متاحة للمشرفين فأعلى.', COLORS.danger);
+      }
       const duration = durRaw ? ticketLogs.parseDuration(durRaw) : null;
       if (durRaw && !(duration >= 0)) return replyEphemeral(i, '❌ المدة غير صحيحة. اكتب دقائق مثل `45` أو ساعة:دقيقة مثل `01:23`.', COLORS.danger);
       return saveTicket(i, { ticketId, owner, claimer, closer, rating, duration, durationSource: duration == null ? null : 'reported', loggedBy: i.user.id, source: 'manual' });

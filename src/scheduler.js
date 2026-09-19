@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const { getDb } = require('./database');
 const staffService = require('./services/staff');
 const reports = require('./services/reports');
+const load = require('./services/load');
 const points = require('./services/points');
 const score = require('./services/score');
 const { ABSENCE, LEAVE_GLOBAL } = require('./constants');
@@ -213,6 +214,23 @@ async function processResignations(client) {
   }
 }
 
+// ===== تذكيرات المهام والتأهيل/التسليم =====
+async function processTaskReminders(client) {
+  const db = getDb();
+  const cutoff = addDays(today(), 1);
+  const rows = db.prepare(`SELECT * FROM staff_tasks
+    WHERE status = 'pending' AND reminder_sent_at IS NULL AND due_date IS NOT NULL
+      AND due_date <= ? AND task_type IN ('onboarding', 'offboarding')
+    ORDER BY due_date, id`).all(cutoff);
+  for (const task of rows) {
+    const overdue = task.due_date < today();
+    const sent = await dm(client, task.user_id, { embeds: [embed(overdue ? '⚠️ مهمة متأخرة' : '⏰ تذكير بمهمة',
+      `لديك المهمة **#${task.id} — ${task.title}**${overdue ? ' متأخرة عن موعدها' : ` موعدها ${kit.tsDate(task.due_date)}`}.\n\nاستخدم **/my-tasks** لمراجعتها.`, COLORS.warning)] });
+    if (sent) db.prepare("UPDATE staff_tasks SET reminder_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(task.id);
+  }
+  return rows.length;
+}
+
 // ===== التقارير =====
 /**
  * يرفع الإيقاف عن كل من انتهت مدته (suspended_until) ويُعلم الفريق.
@@ -266,6 +284,19 @@ async function weeklyReport(client) {
   }
   await sendToChannel(client, 'performance-reports', { embeds });
 
+  // ===== فحص عدالة الحمل: تنبيه الإدارة فقط، بلا خصم أو عقوبة تلقائية =====
+  const fairnessWarnings = [];
+  for (const t of ['support', 'moderation']) {
+    const teamLoad = load.teamLoad(t, 7);
+    const fairness = load.fairness(teamLoad);
+    if (fairness.imbalance >= 2 || fairness.idle.length) {
+      fairnessWarnings.push(`${t === 'support' ? 'الدعم الفني' : 'الإشراف'}: ${fairness.busiest ? `<@${fairness.busiest}> يحمل أعلى عبء` : 'لا يوجد'}${fairness.idle.length ? ` • بلا عمل: ${fairness.idle.map(id => `<@${id}>`).join(' ')}` : ''}`);
+    }
+  }
+  if (fairnessWarnings.length) {
+    await sendToChannel(client, 'staff-alerts', { embeds: [embed('⚖️ فحص عدالة الحمل الأسبوعي', `${fairnessWarnings.join('\n')}\n\nراجعوا **/team-load** قبل توزيع المناوبات أو المهام.`, COLORS.warning)] });
+  }
+
   // ===== قائمة مراجعة بشرية بدل الخصم =====
   if (below.length) {
     const lines = below.sort((a, b) => a.score - b.score).slice(0, 15)
@@ -298,7 +329,9 @@ async function monthlyReport(client) {
     const prev = reports.lastSaved('monthly', `${prevPeriod}:${t}`);
     const diff = prev ? avg - prev.avg : null;
     reports.save('monthly', `${period}:${t}`, { avg, members: rows.map(r => ({ user: r.staff.user_id, score: r.score })) });
-    const best = rows.filter(r => r.staff.rank !== 'Boss').sort((a, b) => b.score - a.score)[0];
+    // استخدم نفس بوابة «أفضل إداري» المعلنة في reports.js، لا مجرد أعلى Score.
+    // هذا يمنع منح +50 لعضو بلا عمل فعلي أو لعضو في إجازة/تجربة.
+    const best = reports.bestOfMonth(rows);
     if (best) points.add(best.staff.user_id, 'best_of_month', t, { refType: 'month', refId: period });
     embeds.push(embed(`🗓️ التقرير الشهري — ${t === 'support' ? 'الدعم الفني' : 'الإشراف'} (${period})`,
       `متوسط Score: **${avg}**${diff != null ? ` (${diff >= 0 ? '📈 +' : '📉 '}${diff} عن الشهر الماضي)` : ''}\n🏅 أفضل إداري: ${best ? `<@${best.staff.user_id}> (${best.score})` : '—'}\n` +
@@ -377,6 +410,7 @@ function start(client) {
     ['suspensions', '0 1 * * *', () => liftSuspensions(client)],
     ['leaves', '5 0 * * *', () => processLeaves(client)],
     ['resignations', '20 0 * * *', () => processResignations(client)],
+    ['task-reminders', '0 8 * * *', () => processTaskReminders(client)],
     ['backup', '15 0 * * *', () => backup.createBackup({ reason: 'scheduled' })],
     ['daily-report', '0 9 * * *', () => dailyReport(client)],
     ['weekly-report', '0 10 * * 5', () => weeklyReport(client)],
@@ -403,4 +437,4 @@ function stop() {
   scheduledTasks.length = 0;
 }
 
-module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, dailyReport, weeklyReport, monthlyReport, JOBS };
+module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, processTaskReminders, dailyReport, weeklyReport, monthlyReport, JOBS };

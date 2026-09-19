@@ -10,6 +10,7 @@ const activity = require('./services/activity');
 const ticketLogs = require('./services/ticketLogs');
 const audit = require('./services/audit');
 const scheduler = require('./scheduler');
+const health = require('./health');
 const settings = require('./services/settings');
 const { deployCommands } = require('./deploy-commands');
 const { embed: buildEmbed, replyEphemeral, COLORS, log: logToChannel, embed, sendToChannel } = require('./utils');
@@ -54,7 +55,15 @@ client.once(Events.ClientReady, async (c) => {
   if (!st.complete) console.log(`⚙️  الإعداد غير مكتمل (رتب ${st.rolesDone}/${st.rolesTotal} • قنوات ${st.channelsDone}/${st.channelsTotal}) — استخدم /setup داخل السيرفر.`);
   if (!st.ticketSourceConfigured) console.log('🎫 التسجيل التلقائي للتكتات غير مفعل — حدد قناة سجل البوت الخارجي من /setup.');
   scheduler.start(client);
+  if (process.env.HEALTH_PORT) {
+    try {
+      healthServer = health.start({ scheduler });
+      console.log(`🩺 Health endpoint يعمل على ${process.env.HEALTH_HOST || '127.0.0.1'}:${process.env.HEALTH_PORT}`);
+    } catch (e) { logger.log('health').error('فشل تشغيل Health endpoint:', e); }
+  }
 });
+
+let healthServer = null;
 
 // ===== قراءة سجل التكتات من قناة البوت الخارجي =====
 async function importExternalTicketLog(msg) {
@@ -214,6 +223,7 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`🛑 إغلاق (${signal})...`);
   try { scheduler.stop(); } catch (e) { console.error(e.message); }
+  try { healthServer?.close(); } catch { /* ignore */ }
   try { client.destroy(); } catch { /* ignore */ }
   try { getDb().close(); } catch { /* ignore */ }
   process.exit(0);
