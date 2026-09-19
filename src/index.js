@@ -1,6 +1,10 @@
 'use strict';
+console.log(`[startup] Starting Staff Manager Bot (${process.version}); entry: src/index.js`);
+console.log('[startup] Loading Discord library...');
 const { Client, GatewayIntentBits, Partials, Events, PermissionFlagsBits } = require('discord.js');
+console.log('[startup] Loading configuration...');
 const config = require('./config');
+console.log('[startup] Loading database module and application services...');
 const { getDb } = require('./database');
 const { commands, resolveComponent, validateRegistry } = require('./commands');
 const { resolveStaff, LEVEL_LABELS, isServerManager } = require('./services/permissions');
@@ -16,6 +20,7 @@ const { deployCommands } = require('./deploy-commands');
 const { embed: buildEmbed, replyEphemeral, COLORS, log: logToChannel, embed, sendToChannel } = require('./utils');
 const { TEAMS, LEVELS } = require('./constants');
 
+console.log('[startup] Application modules loaded; checking required configuration...');
 if (!config.token) { console.error('❌ DISCORD_TOKEN غير موجود في .env'); process.exit(1); }
 if (!config.guildId) { console.error('❌ GUILD_ID غير موجود في .env'); process.exit(1); }
 
@@ -27,7 +32,15 @@ try {
   process.exit(1);
 }
 
-getDb();
+console.log('[startup] Opening SQLite database and applying migrations...');
+try {
+  getDb();
+} catch (e) {
+  console.error('[startup] Database initialization failed:', e.message);
+  console.error('[startup] If native bindings are missing, approve the better-sqlite3 install script and run npm rebuild better-sqlite3. Also check DB_PATH and directory write permissions.');
+  process.exit(1);
+}
+console.log('[startup] Database ready.');
 // ===== عكس تحذيرات/أخطاء المسجّل إلى قناة السجلات =====
 logger.setMirror((level, scope, message) => {
   const color = level === 'error' ? COLORS.danger : COLORS.warning;
@@ -40,7 +53,9 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+let loginWarningTimer;
 client.once(Events.ClientReady, async (c) => {
+  clearTimeout(loginWarningTimer);
   console.log(`✅ ${c.user.tag} جاهز — Staff Manager Bot`);
 
   // تسجيل أوامر السلاش تلقائياً عند كل تشغيل.
@@ -231,8 +246,22 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+client.on(Events.ShardReady, (id) => console.log(`[discord] Shard ${id} connected.`));
+client.on(Events.ShardReconnecting, (id) => console.warn(`[discord] Shard ${id} reconnecting...`));
+client.on(Events.ShardDisconnect, (event, id) => {
+  console.warn(`[discord] Shard ${id} disconnected (code ${event.code}).`);
+  if (event.code === 4014) console.error('[discord] Enable Server Members Intent and Message Content Intent in Discord Developer Portal > Bot.');
+});
+client.on(Events.ShardError, (e, id) => logger.log('discord').error(`Shard ${id} connection error:`, e));
+
+console.log('[startup] Connecting to Discord...');
+loginWarningTimer = setTimeout(() => {
+  console.warn('[startup] Discord has not reported ready after 60 seconds. Check host connectivity to Discord HTTPS/WebSocket endpoints, privileged intents, and any connection errors above.');
+}, 60_000);
+loginWarningTimer.unref();
 client.login(config.token).catch((e) => {
+  clearTimeout(loginWarningTimer);
   console.error(`❌ فشل تسجيل الدخول: ${e.message}`);
-  console.error('   تحقق من DISCORD_TOKEN في .env');
+  console.error('[startup] Check DISCORD_TOKEN, enable Server Members Intent and Message Content Intent in Discord Developer Portal > Bot, and check host connectivity to Discord.');
   process.exit(1);
 });
