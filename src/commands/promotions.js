@@ -1,5 +1,7 @@
 'use strict';
-const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const forms = require('../ui/forms');
+const { homeRow } = require('../ui/navigation');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { LEVELS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, POINTS, COOLDOWNS } = require('../constants');
 const promo = require('../services/promotions');
 const points = require('../services/points');
@@ -39,7 +41,37 @@ const reviewRow = (id) => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId(`promo:approve:${id}`).setLabel('ترقية').setEmoji('✅').setStyle(ButtonStyle.Success),
   new ButtonBuilder().setCustomId(`promo:reject:${id}`).setLabel('رفض').setEmoji('❌').setStyle(ButtonStyle.Danger));
 
+const modals = {
+  request: ({ to = '' } = {}) => ({
+    id: 'promo:modal',
+    title: `📈 طلب ترقية إلى ${to}`.trim(),
+    fields: [
+      forms.field({ id: 'note', label: 'ملاحظة للإدارة', required: false, style: 'paragraph', max: 500,
+        description: 'اختياري: أضف ما يدعم الطلب (إنجازات، التزام، شهادات).' }),
+    ],
+    note: 'سيطّلع المراجع على مؤشراتك ومدة الخدمة ورصيد النقاط قبل القرار، ويصلك الرد في الخاص.',
+  }),
+  reject: ({ id } = {}) => ({
+    id: `promo:rejectmodal:${id}`,
+    title: '❌ سبب رفض الترقية',
+    fields: [
+      forms.select({ id: 'preset', label: 'أسباب جاهزة', required: false, multiple: true,
+        options: [
+          { label: 'المؤشرات لم تكتمل بعد', value: 'المؤشرات لم تكتمل بعد' },
+          { label: 'مدة الخدمة قصيرة', value: 'مدة الخدمة في الرتبة الحالية قصيرة' },
+          { label: 'يحتاج تحسين الأداء', value: 'يحتاج إلى تحسين الأداء قبل الترقية' },
+          { label: 'سلوك أو التزام', value: 'ملاحظات سلوكية أو التزام' },
+        ],
+        description: 'اختر سبباً واحداً أو أكثر، أو اكتب سبباً مخصصاً في الحقل التالي.' }),
+      forms.field({ id: 'reason', label: 'سبب مخصص', required: false, style: 'paragraph', max: 300,
+        description: 'اكتب التفاصيل التي سيراها العضو في رسالة الرفض.' }),
+    ],
+    note: 'يظهر النص للعضو في الخاص ويُسجَّل مع فترة التبريد في سجل التدقيق.',
+  }),
+};
+
 module.exports = {
+  modals,
   commands: [
     {
       data: new SlashCommandBuilder().setName('promotion-info').setDescription('عرض نظام الترقيات وشروطه'),
@@ -67,7 +99,7 @@ module.exports = {
         if (pending) e.addFields({ name: '📨 طلب معلّق', value: `#${pending.id} — بانتظار المراجعة` });
         const hist = points.history(i.user.id, 8);
         if (hist.length) e.addFields({ name: '🧾 آخر حركات النقاط', value: hist.map(h => `${h.points > 0 ? '🟢 +' : '🔴 '}${h.points} — ${h.reason}`).join('\n').slice(0, 1024) });
-        return i.reply({ embeds: [e], ephemeral: true });
+        return i.reply({ embeds: [e], components: [homeRow()], ephemeral: true });
       },
     },
     {
@@ -80,9 +112,7 @@ module.exports = {
         const ev = promo.evaluate(s);
         if (!ev.rule) return replyEphemeral(i, ev.reason, COLORS.gray);
         if (!ev.eligible) return i.reply({ embeds: [statusEmbed(s, ev).setTitle('❌ غير مؤهل لتقديم طلب ترقية حالياً')], ephemeral: true });
-        const m = new ModalBuilder().setCustomId('promo:modal').setTitle(`📈 طلب ترقية إلى ${ev.rule.to}`);
-        m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note').setLabel('ملاحظة للإدارة — اختياري').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(false)));
-        return i.showModal(m);
+        return forms.open(i, { ...modals.request({ to: ev.rule.to }), title: `📈 طلب ترقية إلى ${ev.rule.to}` });
       },
     },
     {
@@ -142,14 +172,13 @@ module.exports = {
       return log(i.client, '📈 ترقية', `<@${r.user_id}>: ${rule.from} → ${rule.to} بواسطة <@${i.user.id}>${rolesOk ? '' : '\n⚠️ لم يتم تعديل الرتب تلقائياً — عدّلها يدوياً'}`, COLORS.success);
     },
     'promo:reject': async (i, [id]) => {
-      const m = new ModalBuilder().setCustomId(`promo:rejectmodal:${id}`).setTitle('❌ سبب رفض الترقية');
-      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('السبب').setStyle(TextInputStyle.Paragraph).setMaxLength(300).setRequired(true)));
-      return i.showModal(m);
+      return forms.open(i, modals.reject({ id }));
     },
     'promo:rejectmodal': async (i, [id]) => {
       const r = promo.getRequest(Number(id));
       if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
-      const reason = i.fields.getTextInputValue('reason').trim();
+      const reason = forms.combine(i);
+      if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب سبباً مخصصاً قبل الإرسال.', COLORS.danger);
       audit.record({ action: 'promotion_rejected', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, reason }, channelId: i.channelId });
       promo.review(r.id, 'rejected', i.user.id, reason);
       const until = points.setCooldown(r.user_id, 'rejected');

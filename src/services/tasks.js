@@ -26,9 +26,16 @@ function get(id) {
   return getDb().prepare('SELECT * FROM staff_tasks WHERE id = ?').get(Number(id)) || null;
 }
 
-function list(userId, { includeCompleted = false, limit = 20 } = {}) {
+function list(userId, { includeCompleted = false, limit = 20, offset = 0 } = {}) {
   return getDb().prepare(`SELECT * FROM staff_tasks WHERE user_id = ? AND task_type != 'points_appeal' ${includeCompleted ? '' : "AND status = 'pending'"}
-    ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, COALESCE(due_date, '9999-12-31'), id DESC LIMIT ?`).all(userId, limit);
+    ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, COALESCE(due_date, '9999-12-31'), id DESC LIMIT ? OFFSET ?`).all(userId, limit, offset);
+}
+
+function listPage(userId, { includeCompleted = false, page = 1 } = {}) {
+  const total = getDb().prepare(`SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND task_type != 'points_appeal' ${includeCompleted ? '' : "AND status = 'pending'"}`).get(userId).c;
+  const pages = Math.max(1, Math.ceil(total / 5));
+  const current = Math.min(Math.max(Number.isSafeInteger(Number(page)) ? Number(page) : 1, 1), pages);
+  return { items: list(userId, { includeCompleted, limit: 5, offset: (current - 1) * 5 }), page: current, pages, total };
 }
 
 function pendingCount(userId) {
@@ -72,4 +79,4 @@ function cancel(id, actorId = null) {
   return res.changes > 0;
 }
 
-module.exports = { ensureOnboarding, create, get, list, listByType, pendingCount, approveOnboarding, complete, cancel };
+module.exports = { ensureOnboarding, create, get, list, listPage, listByType, pendingCount, approveOnboarding, complete, cancel };

@@ -2,7 +2,9 @@
 const { getDb } = require('../database');
 const staffService = require('./staff');
 const settings = require('./settings');
-const { today, daysBetween, isValidDate } = require('../utils');
+const { today, daysBetween, isValidDate, addDays } = require('../utils');
+const { TEAMS, WEEKDAYS_AR } = require('../constants');
+const audit = require('./audit');
 
 const APPROVED = "status = 'approved'";
 const PENDING_OR_APPROVED = "status IN ('pending', 'approved')";
@@ -90,6 +92,179 @@ function daysInRangeForUser(userId, start, end) {
   return days;
 }
 
+
+// ===== أيام العمل والرصيد =====
+/** أيام الراحة الأسبوعية المفعّلة (0 = الأحد … 6 = السبت). */
+function weeklyOffDays(policy = settings.leavePolicy()) {
+  return Array.isArray(policy.weeklyOffDays) ? policy.weeklyOffDays : Array.isArray(policy.weeklyOff) ? policy.weeklyOff : [];
+}
+function weekdayOf(date) {
+  const t = Date.parse(`${date}T00:00:00Z`);
+  return Number.isNaN(t) ? null : new Date(t).getUTCDay();
+}
+function isWeeklyOff(date, offDays) {
+  const day = weekdayOf(date);
+  return day != null && offDays.includes(day);
+}
+/** عدد الأيام التقويمية داخل النطاق (شامل الطرفين). */
+function spanDays(start, end) {
+  if (!isValidDate(start) || !isValidDate(end)) return null;
+  return daysBetween(start, end) + 1;
+}
+/** الأيام المحتسبة فعلياً: تقويمية، أو أيام عمل فقط عند تفعيل الإعداد. */
+function countedDays(start, end, policy = settings.leavePolicy()) {
+  const span = spanDays(start, end);
+  if (span == null || span < 1) return span;
+  if (!policy?.workdayCounting) return span;
+  const off = weeklyOffDays(policy);
+  if (!off.length) return span;
+  let count = 0;
+  for (let day = start; day <= end; day = addDays(day, 1)) if (!isWeeklyOff(day, off)) count += 1;
+  return count;
+}
+/** الأيام غير المحتسبة داخل النطاق (راحة أسبوعية) — للعرض فقط. */
+function skippedOffDays(start, end, policy = settings.leavePolicy()) {
+  const span = spanDays(start, end);
+  if (span == null || span < 1) return [];
+  const off = weeklyOffDays(policy);
+  if (!policy?.workdayCounting || !off.length) return [];
+  const days = [];
+  for (let day = start; day <= end; day = addDays(day, 1)) if (isWeeklyOff(day, off)) days.push(day);
+  return days;
+}
+function offDaysLabel(days) {
+  const names = [...new Set(days.map(weekdayOf))].filter(day => day != null).map(day => WEEKDAYS_AR[day]);
+  return names.length ? names.join('، ') : '—';
+}
+
+function clipRange(start, end, from, to) {
+  const s = start < from ? from : start;
+  const e = end > to ? to : end;
+  return s <= e ? { start: s, end: e } : null;
+}
+
+/** استخدام النطاق (آخر 90 يوماً أو أي نطاق) مقسّماً حسب النوع وحالة الطلب. */
+function usageInRange(userId, from, to, { excludeId = null, days = null } = {}) {
+  const policy = settings.leavePolicy();
+  const rows = getDb().prepare(`SELECT * FROM leave_requests WHERE user_id = ? AND status IN ('pending','approved','ended')
+    AND start_date <= ? AND end_date >= ?`).all(userId, to, from);
+  const types = {};
+  const totals = { used: 0, pending: 0 };
+  for (const row of rows) {
+    if (excludeId != null && row.id === Number(excludeId)) continue;
+    const clipped = clipRange(row.start_date, row.end_date, from, to);
+    if (!clipped) continue;
+    const daysCounted = days != null ? days : countedDays(clipped.start, clipped.end, policy);
+    if (daysCounted == null || daysCounted < 1) continue;
+    const bucket = types[row.leave_type] || (types[row.leave_type] = { used: 0, pending: 0, requests: 0 });
+    bucket.requests += 1;
+    if (row.status === 'pending') { bucket.pending += daysCounted; totals.pending += daysCounted; }
+    else { bucket.used += daysCounted; totals.used += daysCounted; }
+  }
+  return { types, totals };
+}
+
+/** الرصيد السنوي (اختياري): يُفرض فقط عندما يكون annualDays أكبر من صفر. */
+function annualUsage(userId, date = today(), { excludeId = null } = {}) {
+  const policy = settings.leavePolicy();
+  const year = String(date).slice(0, 4);
+  const row = usageInRange(userId, `${year}-01-01`, `${year}-12-31`, { excludeId });
+  const cap = policy.annualDays || 0;
+  const used = row.totals.used;
+  const pending = row.totals.pending;
+  return {
+    year, cap, used, pending,
+    remaining: cap ? Math.max(0, cap - used) : null,
+    afterPending: cap ? Math.max(0, cap - used - pending) : null,
+    byType: row.types,
+  };
+}
+
+/** لوحة رصيد جاهزة للعرض: 90 يوماً لكل نوع + الرصيد السنوي + أقرب تاريخ مسموح. */
+function allowance(userId, { date = today(), excludeId = null } = {}) {
+  const policy = settings.leavePolicy();
+  const from = addDays(date, -89);
+  const window = usageInRange(userId, from, date, { excludeId });
+  const types = {};
+  for (const [type, rule] of Object.entries(policy.rules || {})) {
+    const used = window.types[type]?.used || 0;
+    const pending = window.types[type]?.pending || 0;
+    const cap = Number(rule.maxDaysPer90 || policy.maxDaysPer90) || policy.maxDaysPer90;
+    types[type] = { cap90: cap, used90: used, pending90: pending, remaining90: Math.max(0, cap - used), requests: window.types[type]?.requests || 0 };
+  }
+  const annual = annualUsage(userId, date, { excludeId });
+  const rule = policy.minGapDays > 0
+    ? getDb().prepare(`SELECT MAX(end_date) last FROM leave_requests WHERE user_id = ? AND ${APPROVED} AND end_date >= ?`).get(userId, date)
+    : null;
+  const nextAllowedStart = rule?.last ? addDays(rule.last, Number(policy.minGapDays) + 1) : null;
+  return {
+    date, from, types, annual,
+    totalUsed90: window.totals.used, totalPending: window.totals.pending,
+    maxConcurrent: policy.maxConcurrent, maxDays: policy.maxDays,
+    nextAllowedStart: nextAllowedStart && nextAllowedStart > date ? nextAllowedStart : null,
+  };
+}
+
+/** تغطية الفرق خلال نطاق: أدنى عدد حاضر لكل فريق، وأيام الخطر. */
+function teamCoverage(start, end, { excludeUserId = null } = {}) {
+  const policy = settings.leavePolicy();
+  const required = policy.teamCover;
+  const rows = getDb().prepare(`SELECT r.user_id, r.leave_type, r.start_date, r.end_date, s.team
+    FROM leave_requests r LEFT JOIN staff_members s ON s.user_id = r.user_id
+    WHERE r.status = 'approved' AND r.start_date <= ? AND r.end_date >= ?`).all(end, start)
+    .filter(r => !excludeUserId || r.user_id !== excludeUserId);
+  const roster = getDb().prepare("SELECT team, COUNT(*) c FROM staff_members WHERE team IN ('support','moderation') AND status NOT IN ('resigned','left') AND (suspended_until IS NULL OR suspended_until <= datetime('now')) GROUP BY team").all();
+  const strengths = Object.fromEntries(roster.map(r => [r.team, r.c]));
+  const shared = []; // من هم في إجازة معتمدة يغطون أكثر من فريق (نادر) — نحتسبهم للفريق المسجل
+  const teams = {};
+  for (const [team] of Object.entries(TEAMS)) {
+    const size = strengths[team] || 0;
+    if (!size) continue;
+    let min = size;
+    let worstDay = start;
+    const away = rows.filter(r => r.team === team);
+    for (let day = start; day <= end; day = addDays(day, 1)) {
+      const count = size - away.filter(r => r.start_date <= day && r.end_date >= day).length;
+      if (count < min) { min = count; worstDay = day; }
+    }
+    teams[team] = { size, min, worstDay, away: away.length, below: min < required };
+    shared.push({ team, ...teams[team] });
+  }
+  const below = shared.filter(t => t.below);
+  return { start, end, required, teams, below, worstTeam: below[0] || null, enforce: !!policy.enforceTeamCover };
+}
+
+/** أثر اعتماد طلب هذا العضو على تغطية فريقه. */
+function teamImpact(userId, start, end, { excludeId = null } = {}) {
+  const member = staffService.get(userId);
+  const team = member?.team;
+  if (!team || !TEAMS[team]) return null;
+  const policy = settings.leavePolicy();
+  const size = getDb().prepare("SELECT COUNT(*) c FROM staff_members WHERE team = ? AND status NOT IN ('resigned','left') AND (suspended_until IS NULL OR suspended_until <= datetime('now'))").get(team).c;
+  const away = getDb().prepare(`SELECT COUNT(*) c FROM leave_requests WHERE user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ? ${excludeId ? 'AND id != ?' : ''}`)
+    .get(userId, end, start, ...(excludeId ? [Number(excludeId)] : []));
+  const others = teamCoverage(start, end, { excludeUserId: userId });
+  const current = others.teams[team]?.min ?? size;
+  const after = Math.max(0, current - (away.c ? 0 : 1));
+  return { team, size, required: policy.teamCover, current, after, below: after < policy.teamCover, enforce: !!policy.enforceTeamCover };
+}
+
+/** سجل مختصر يساعد المراجع قبل القرار. */
+function memberHistory(userId, { limit = 3 } = {}) {
+  const recent = getDb().prepare(`SELECT id, leave_type, start_date, end_date, status, duration_days FROM leave_requests
+    WHERE user_id = ? ORDER BY id DESC LIMIT ?`).all(userId, Math.max(1, Math.min(Number(limit) || 3, 10)));
+  const stats = getDb().prepare(`SELECT
+    SUM(status = 'approved') approved, SUM(status = 'rejected') rejected, SUM(status = 'cancelled') cancelled,
+    SUM(status IN ('approved','ended')) counted FROM leave_requests WHERE user_id = ?`).get(userId);
+  const row = getDb().prepare(`SELECT COUNT(*) c FROM leave_requests WHERE user_id = ? AND status IN ('pending','approved')`).get(userId);
+  return {
+    recent, approved: stats.approved || 0, rejected: stats.rejected || 0, cancelled: stats.cancelled || 0,
+    countedRequests: stats.counted || 0, openRequests: row.c,
+    activeToday: activeForUser(userId).length, used90: usageInRange(userId, addDays(today(), -89), today()).totals.used,
+    next: approvedForUser(userId)[0] || null,
+  };
+}
+
 function minGapViolated(userId, start, end, excludeId = null) {
   const policy = settings.leavePolicy();
   const gap = Number(policy.minGapDays || 1);
@@ -119,22 +294,36 @@ function validate({ userId, leaveType, start, end, excludeId = null, atApproval 
   const global = settings.leavePolicy();
 
   if (!isValidDate(start) || !isValidDate(end)) return { ok: false, code: 'date_format', message: 'صيغة التاريخ غير صحيحة — استخدم YYYY-MM-DD.', hint: 'مثال: 2026-09-20' };
-  const dur = durationDays(start, end);
-  if (dur == null || dur < 1) return { ok: false, code: 'date_order', message: 'تاريخ النهاية قبل البداية.' };
+  const span = spanDays(start, end);
+  if (span == null || span < 1) return { ok: false, code: 'date_order', message: 'تاريخ النهاية قبل البداية.' };
+  const dur = countedDays(start, end, global);
+  if (dur < 1) return { ok: false, code: 'no_workdays', message: 'الفترة المختارة كلها أيام راحة أسبوعية — لا يوجد يوم عمل يُحتسب.', hint: `أيام الراحة المضبوطة: ${offDaysLabel(weeklyOffDays(global))}. اختر أيام عمل أو عدّل الإعداد من /setup.` };
   if (end < today() && !atApproval) return { ok: false, code: 'in_past', message: 'لا يمكن طلب إجازة في الماضي.' };
-  if (dur > policy.maxDays) return { ok: false, code: 'type_cap', message: `إجازة «${policy.emoji || ''} ${leaveType}» لا تتجاوز ${policy.maxDays} أيام (طلبت ${dur}).`, hint: policy.note };
-  if (dur > global.maxDays) return { ok: false, code: 'global_cap', message: `الحد الأقصى العام لأي إجازة هو ${global.maxDays} يوم.` };
+  const spanNote = span === dur ? '' : ` (${span} يوماً تقويمياً)`;
+  if (dur > policy.maxDays) return { ok: false, code: 'type_cap', message: `إجازة «${policy.emoji || ''} ${leaveType}» لا تتجاوز ${policy.maxDays} يوم عمل (طلبت ${dur}${spanNote}).`, hint: policy.note };
+  if (dur > global.maxDays) return { ok: false, code: 'global_cap', message: `الحد الأقصى العام لأي إجازة هو ${global.maxDays} يوم عمل.` };
 
   const nh = noticeHours(start);
   if (policy.minNoticeHours > 0 && nh != null && nh < policy.minNoticeHours && !atApproval) {
     return { ok: false, code: 'notice', message: `هذا النوع يحتاج إشعاراً قبل ${policy.minNoticeHours} ساعة.`, hint: `تبقى ${Math.max(0, nh)} ساعة فقط — اختر بداية لاحقة أو نوعاً طارئاً.` };
   }
 
-  const days90 = daysInRangeForUser(userId, start, end);
-  const wouldBe = days90 + dur - (excludeId ? (get(excludeId)?.duration_days || 0) : 0);
+  // سقف 90 يوماً لكل نوع — يُحسب على الأيام المحتسبة فعلياً (أيام العمل عند تفعيل الإعداد).
+  const window90 = usageInRange(userId, addDays(end, -89), end, { excludeId });
+  const used90 = window90.types[leaveType]?.used || 0;
+  const wouldBe = used90 + dur;
   const cap90 = policy.maxDaysPer90 || global.maxDaysPer90;
   if (cap90 && wouldBe > cap90) {
-    return { ok: false, code: 'rolling_cap', message: `تجاوزت سقف ${cap90} يوم خلال 90 يوماً لهذا النوع (سيكون لديك ${wouldBe}).`, hint: 'قلّل المدة أو أجّل البداية.' };
+    return { ok: false, code: 'rolling_cap', message: `تجاوزت سقف ${cap90} يوم خلال 90 يوماً لهذا النوع (المستخدم ${used90} + ${dur} = ${wouldBe}).`, hint: `المتبقي لك حالياً ${Math.max(0, cap90 - used90)} يوم — قلّل المدة أو أجّل البداية.` };
+  }
+
+  // الرصيد السنوي يُفرض فقط عندما يضبطه المسؤول (annualDays > 0).
+  let annual = null;
+  if (global.annualDays > 0) {
+    annual = annualUsage(userId, end, { excludeId });
+    if (annual.used + dur > annual.cap) {
+      return { ok: false, code: 'annual_cap', message: `تجاوزت رصيدك السنوي ${annual.cap} يوم لعام ${annual.year} (المستخدم ${annual.used}، المطلوب ${dur}).`, hint: `المتبقي من رصيدك ${annual.remaining} يوم — قلّل المدة أو راجع الإدارة.` };
+    }
   }
 
   const overlap = userHasOverlap(userId, start, end, { excludeId, includePending: !atApproval });
@@ -143,15 +332,85 @@ function validate({ userId, leaveType, start, end, excludeId = null, atApproval 
   const gap = minGapViolated(userId, start, end, excludeId);
   if (gap) {
     const side = gap.side === 'before' ? 'تنتهي إجازتك السابقة' : 'تبدأ إجازتك اللاحقة';
-    return { ok: false, code: 'gap', message: `${side} في ${gap.neighbour} — تحتاج ${gap.required} يوم راحة (لديك ${gap.gap}).` };
+    return { ok: false, code: 'gap', message: `${side} في ${gap.neighbour} — تحتاج ${gap.required} يوم راحة (لديك ${gap.gap}).`, hint: 'أجّل البداية يوماً أو أكثر.' };
   }
 
   if (atApproval) {
     const c = concurrentApproved(start, end, excludeId);
     if (c >= global.maxConcurrent) return { ok: false, code: 'concurrent', message: `تم بلوغ الحد الأقصى (${global.maxConcurrent}) للمجازين في هذه الفترة.`, hint: `يوجد ${c} مجازين — جرّب فترة أخرى.` };
+    if (global.enforceTeamCover && global.teamCover > 0) {
+      const impact = teamImpact(userId, start, end, { excludeId });
+      if (impact?.below) return { ok: false, code: 'team_cover', message: `اعتماد الطلب يخفض تغطية ${TEAMS[impact.team] || impact.team} إلى ${impact.after} (الحد الأدنى ${impact.required}).`, hint: 'أعد جدولة التواريخ أو اعتمد طلباً آخر لنفس الفترة.' };
+    }
   }
 
-  return { ok: true, durationDays: dur, noticeHours: nh };
+  return { ok: true, durationDays: dur, calendarDays: span, noticeHours: nh, annual, skippedOffDays: skippedOffDays(start, end, global) };
+}
+
+/**
+ * بطاقة ما قبل الإرسال: تحقق + رصيد + تغطية + أثر الفريق + تحذيرات، بلا أي كتابة في القاعدة.
+ * الهدف: ألا يكتشف العضو مشكلة الحدود بعد إرسال الطلب.
+ */
+function previewRequest({ userId, leaveType, start, end, excludeId = null }) {
+  const policy = settings.leavePolicy(leaveType);
+  const global = settings.leavePolicy();
+  const vr = validate({ userId, leaveType, start, end, excludeId });
+  const span = spanDays(start, end);
+  const counted = vr.durationDays ?? countedDays(start, end, global);
+  if (!vr.ok) return { ok: false, error: vr, policy, span, counted };
+  const coverage = coverageBetween(start, end);
+  const impact = teamImpact(userId, start, end, { excludeId });
+  const warnings = [];
+  if (coverage.peak >= coverage.max) warnings.push(`التغطية العامة ممتلئة (${coverage.peak}/${coverage.max}) — الطلب قد يُرفض.`);
+  else if (coverage.peak >= coverage.max - 1) warnings.push(`التغطية العامة شبه ممتلئة (${coverage.peak}/${coverage.max}).`);
+  if (impact?.below) warnings.push(`تغطية ${TEAMS[impact.team] || impact.team} ستنخفض إلى ${impact.after} (الحد الأدنى ${impact.required}).`);
+  const skipped = vr.skippedOffDays || [];
+  if (skipped.length) warnings.push(`لن تُحتسب أيام الراحة الأسبوعية: ${offDaysLabel(skipped)} (${skipped.length} يوم).`);
+  return {
+    ok: true, error: null, policy, global, span, counted, skipped, warnings,
+    noticeHours: vr.noticeHours, annual: vr.annual,
+    allowance: allowance(userId, { excludeId }),
+    coverage, impact,
+  };
+}
+
+// ===== اقتراح تواريخ بديلة من المراجع =====
+function clearSuggestion(id) {
+  getDb().prepare('UPDATE leave_requests SET suggested_start = NULL, suggested_end = NULL, suggested_note = NULL, suggested_by = NULL, suggested_at = NULL WHERE id = ?').run(Number(id));
+}
+function suggestRequest({ id, actorId, start, end, note = null }) {
+  const row = get(id);
+  if (!row) return { ok: false, code: 'not_found', message: 'الطلب غير موجود.' };
+  if (row.status !== 'pending') return { ok: false, code: 'status', message: 'الاقتراح يعمل على الطلبات المعلّقة فقط.' };
+  if (!isValidDate(start) || !isValidDate(end)) return { ok: false, code: 'date_format', message: 'صيغة التاريخ غير صحيحة — استخدم YYYY-MM-DD.' };
+  if (end < start) return { ok: false, code: 'date_order', message: 'تاريخ النهاية قبل البداية.' };
+  const vr = validate({ userId: row.user_id, leaveType: row.leave_type, start, end, excludeId: row.id });
+  if (!vr.ok) return { ok: false, code: vr.code, message: `التواريخ المقترحة غير صالحة: ${vr.message}`, hint: vr.hint };
+  getDb().prepare(`UPDATE leave_requests SET suggested_start = ?, suggested_end = ?, suggested_note = ?, suggested_by = ?, suggested_at = datetime('now') WHERE id = ?`)
+    .run(start, end, note || null, actorId, row.id);
+  audit.record({ action: 'leave_suggestion_sent', actorId, targetId: row.user_id, details: { requestId: row.id, start, end } });
+  return { ok: true, row: get(row.id) };
+}
+function acceptSuggestion({ id, userId }) {
+  const row = get(id);
+  if (!row || row.user_id !== Number(userId) && row.user_id !== userId) return { ok: false, code: 'not_found', message: 'الطلب غير موجود.' };
+  if (row.status !== 'pending') return { ok: false, code: 'status', message: 'الطلب لم يعد معلقاً.' };
+  if (!row.suggested_start || !row.suggested_end) return { ok: false, code: 'no_suggestion', message: 'لا يوجد اقتراح على هذا الطلب.' };
+  const vr = validate({ userId: row.user_id, leaveType: row.leave_type, start: row.suggested_start, end: row.suggested_end, excludeId: row.id });
+  if (!vr.ok) return { ok: false, code: vr.code, message: `تعذّر تطبيق التواريخ المقترحة: ${vr.message}`, hint: vr.hint };
+  getDb().prepare(`UPDATE leave_requests SET start_date = ?, end_date = ?, duration_days = ?, notice_hours = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(row.suggested_start, row.suggested_end, vr.durationDays, vr.noticeHours, row.id);
+  clearSuggestion(row.id);
+  audit.record({ action: 'leave_suggestion_accepted', actorId: row.user_id, targetId: row.user_id, details: { requestId: row.id, start: row.suggested_start, end: row.suggested_end } });
+  return { ok: true, row: get(row.id) };
+}
+function declineSuggestion({ id, userId }) {
+  const row = get(id);
+  if (!row || row.user_id !== userId) return { ok: false, code: 'not_found', message: 'الطلب غير موجود.' };
+  if (!row.suggested_start) return { ok: false, code: 'no_suggestion', message: 'لا يوجد اقتراح على هذا الطلب.' };
+  clearSuggestion(row.id);
+  audit.record({ action: 'leave_suggestion_declined', actorId: userId, targetId: userId, details: { requestId: row.id } });
+  return { ok: true, row: get(row.id) };
 }
 
 // ===== تغطية اليوم والنطاق =====
@@ -197,7 +456,6 @@ function extendRequest({ id, userId, newEnd, actorId }) {
   if (!vr.ok) return vr;
   const db = getDb();
   db.prepare(`UPDATE leave_requests SET end_date = ?, duration_days = ?, extended_count = extended_count + 1, updated_at = datetime('now') WHERE id = ?`).run(newEnd, vr.durationDays, row.id);
-  const audit = require('./audit');
   audit.record({ action: 'leave_extended', actorId, targetId: row.user_id, details: { requestId: row.id, from: row.end_date, to: newEnd } });
   return { ok: true, row: get(row.id) };
 }
@@ -231,6 +489,9 @@ function markReminder(id, current, key) {
 module.exports = {
   concurrentApproved, userHasOverlap, approvedForUser, activeForUser, pendingForUser, get, list,
   hasApprovedCover, syncVacationRole, markReminder,
-  durationDays, noticeHours, daysInRangeForUser, minGapViolated, validate,
+  durationDays, noticeHours, daysInRangeForUser, minGapViolated, validate, previewRequest,
+  spanDays, countedDays, skippedOffDays, weeklyOffDays, offDaysLabel,
+  usageInRange, annualUsage, allowance, teamCoverage, teamImpact, memberHistory,
+  suggestRequest, acceptSuggestion, declineSuggestion, clearSuggestion,
   coverageFor, coverageBetween, createRequest, extendRequest,
 };

@@ -63,8 +63,12 @@ function monthlyRaw(userId, days = 30, offsetDays = 0) {
   const act = db.prepare(`SELECT COUNT(*) msgs, COUNT(DISTINCT day) days FROM activity_logs WHERE user_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
     .get(...timeArgs([userId, since]));
   act.weighted = weightedMessages(userId, since, until);
-  const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, AVG(duration) d, SUM(reopened) reopened FROM ticket_metrics WHERE claimer = ? AND closed_at >= datetime('now', ?)` + timeRange('closed_at'))
+  const t = db.prepare(`SELECT COUNT(*) c, COUNT(rating) ratingCount, AVG(rating) r, AVG(duration) d, SUM(reopened) reopened FROM ticket_metrics WHERE claimer = ? AND closed_at >= datetime('now', ?)` + timeRange('closed_at'))
     .get(...timeArgs([userId, since]));
+  const external = db.prepare(`SELECT COUNT(*) c, AVG(stars) r FROM support_ratings WHERE staff_id = ? AND rated_at >= datetime('now', ?)` + timeRange('rated_at'))
+    .get(...timeArgs([userId, since]));
+  // لا نجمع المصدرين: قد يكون تقييم التكت نفسه قد نُشر في قناة التقييمات.
+  const rating = external.c ? external.r : t.r;
   const m = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE moderator_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
     .get(...timeArgs([userId, since]));
   const w = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND voided_at IS NULL AND created_at >= datetime('now', ?)` + timeRange('created_at'))
@@ -78,7 +82,8 @@ function monthlyRaw(userId, days = 30, offsetDays = 0) {
       FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?)`).get(since, userId, since);
   return {
     messages: act.msgs, weightedMessages: Math.round((act.weighted || 0) * 100) / 100, activeDays: act.days,
-    tickets: t.c, avgRating: t.r != null ? Math.round(t.r * 100) / 100 : null, avgDuration: t.d != null ? Math.round(t.d) : null, reopened: t.reopened || 0,
+    tickets: t.c, avgRating: rating != null ? Math.round(rating * 100) / 100 : null,
+    ratingCount: external.c || t.ratingCount, ratingSource: external.c ? 'external' : 'tickets', avgDuration: t.d != null ? Math.round(t.d) : null, reopened: t.reopened || 0,
     actions: m.c, warnings: w.c, positiveNotes: n.pos || 0, negativeNotes: n.neg || 0,
     leaveDays: Math.max(0, Math.round(lv.d || 0)),
   };

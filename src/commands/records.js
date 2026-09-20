@@ -1,11 +1,14 @@
 'use strict';
+const { homeRow } = require('../ui/navigation');
 const { SlashCommandBuilder } = require('discord.js');
 const { LEVELS, NOTE_TYPES, WARNING_TYPES, COOLDOWNS, TEAMS, STATUS } = require('../constants');
 const { getDb } = require('../database');
 const points = require('../services/points');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
-const { embed, COLORS, replyEphemeral, dm, log, discordTs } = require('../utils');
+const { embed, COLORS, replyEphemeral, dm, log, discordTs, sendToChannel, arDigits } = require('../utils');
+const staffSync = require('../services/staffSync');
+const { snapshot } = staffSync;
 
 function recordEmbed(userId, { includeSecret }) {
   const db = getDb();
@@ -14,7 +17,7 @@ function recordEmbed(userId, { includeSecret }) {
   const s = staffService.get(userId);
   const e = embed(`📁 سجل الإداري ${userId}`, null, COLORS.info)
     .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
-  // ===== تاريخ الرتب: من رقّى مَن ومتى (ROADMAP 2.1) =====
+  // ===== تاريخ الرتب: من رقّى مَن ومتى =====
   const RANK_CHANGE = {
     promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين', reinstate: '↩️ إعادة تفعيل',
     remove: '🚪 إزالة', left_guild: '👋 مغادرة السيرفر',
@@ -111,7 +114,7 @@ module.exports = {
     {
       data: new SlashCommandBuilder().setName('my-record').setDescription('عرض سجلك الشخصي'),
       level: LEVELS.STAFF,
-      async execute(i) { return i.reply({ embeds: [recordEmbed(i.user.id, { includeSecret: false })], ephemeral: true }); },
+      async execute(i) { return i.reply({ embeds: [recordEmbed(i.user.id, { includeSecret: false })], components: [homeRow()], ephemeral: true }); },
     },
     {
       data: new SlashCommandBuilder().setName('unsuspend').setDescription('رفع الإيقاف عن إداري قبل انتهاء مدته (Boss أو أعلى)')
@@ -131,6 +134,31 @@ module.exports = {
         await replyEphemeral(i, `✅ تم رفع الإيقاف عن <@${user.id}> وعاد إلى الحالة النشطة.\n_تبقى فترة تبريد الترقية كما هي حتى انتهائها._`, COLORS.success);
         await dm(i.client, user.id, { embeds: [embed('✅ رُفع الإيقاف', `تمت إعادة تفعيل حسابك الإداري.\n**السبب:** ${reason}\n\nنعتذر عن أي إزعاج، ومرحباً بعودتك.`, COLORS.success)] });
         return log(i.client, '↩️ رفع إيقاف', `<@${user.id}> بواسطة <@${i.user.id}>\n${reason}`, COLORS.success);
+      },
+    },
+    {
+      data: new SlashCommandBuilder().setName('sync-staff').setDescription('تسجيل كل الإداريين من رتبهم في ديسكورد مرة واحدة (بدل انتظار رسالة من كل عضو)')
+        .addBooleanOption(o => o.setName('report').setDescription('إرسال التقرير إلى قناة سجلات البوت'))
+        .addBooleanOption(o => o.setName('quiet').setDescription('عرض الملخص فقط دون قوائم الأسماء')),
+      level: LEVELS.MANAGEMENT,
+      async execute(i) {
+        await i.deferReply({ ephemeral: true });
+        const guild = i.guild || await i.client.guilds.fetch(i.guildId);
+        const report = await staffSync.syncGuild(guild, { actorId: i.user.id });
+        if (report.error) return i.editReply({ embeds: [embed('⚠️ تعذّرت المزامنة', report.error, COLORS.warning)] });
+        const quiet = i.options.getBoolean('quiet') === true;
+        const e = staffSync.reportEmbed(report, { title: '🔄 مزامنة الإداريين' });
+        if (quiet) e.spliceFields(0, e.data.fields?.length || 0);
+        if (i.options.getBoolean('report')) {
+          await sendToChannel(i.client, 'staff-logs', { embeds: [staffSync.reportEmbed(report, { title: '🔄 مزامنة الإداريين — تقرير كامل' })] });
+        }
+        const stats = snapshot();
+        e.addFields({ name: '📚 الحالة بعد المزامنة', value: [
+          `المسجّلون: **${arDigits(stats.total)}** • نشط: **${arDigits(stats.active)}** • تجريبي: **${arDigits(stats.probation)}**`,
+          `إجازة/إيقاف: **${arDigits(stats.away)}** • خارج الفريق: **${arDigits(stats.out)}**`,
+          stats.unknown ? `⚠️ **${arDigits(stats.unknown)}** سجلاً برتبة غير مربوطة في /setup` : '✅ كل الرتب المسجّلة مربوطة بإعدادات البوت',
+        ].join('\n') });
+        return i.editReply({ embeds: [e] });
       },
     },
   ],

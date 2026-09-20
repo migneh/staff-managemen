@@ -2,19 +2,28 @@
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { LEVELS } = require('../constants');
 const tasks = require('../services/tasks');
+const { homeRow } = require('../ui/navigation');
+const { tsDate, trim, navRow } = require('../ui/kit');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, isValidDate } = require('../utils');
 
-function taskPayload(userId, includeCompleted = false) {
-  const rows = tasks.list(userId, { includeCompleted, limit: 20 });
-  if (!rows.length) return { embeds: [embed('📋 مهامي', 'لا توجد مهام معلّقة حالياً. ✨', COLORS.success)], components: [] };
+function taskPayload(userId, includeCompleted = false, page = 1) {
+  const result = tasks.listPage(userId, { includeCompleted, page });
+  if (!result.total) return { embeds: [embed('📋 مهامي', '✅ لا توجد مهام معلّقة حالياً. عد إلى لوحتك لمراجعة الأداء والطلبات.', COLORS.success)], components: [homeRow()] };
   const status = { pending: '⏳', completed: '✅', cancelled: '🚫' };
-  const lines = rows.map(t => `${status[t.status] || '•'} **#${t.id} — ${t.title}**${t.due_date ? ` • الموعد: ${t.due_date}` : ''}${t.description ? `\n╰ ${t.description}` : ''}`);
-  const buttons = rows.filter(t => t.status === 'pending').slice(0, 10).map(t => new ButtonBuilder().setCustomId(`task:complete:${t.id}`).setLabel(`إنهاء #${t.id}`).setEmoji('✅').setStyle(ButtonStyle.Success));
-  const components = [];
-  for (let i = 0; i < buttons.length; i += 5) components.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-  return { embeds: [embed('📋 مهامي', lines.join('\n\n'), COLORS.info).setFooter({ text: 'بعد إكمال مهام التأهيل الثلاث يراجع المدير جاهزيتك قبل اعتماد الحالة النشطة.' })], components };
+  const e = embed('📋 مهامي', `**${result.total}** مهمة • مرتبة حسب الموعد الأقرب.\nبعد إنجاز المهمة فعلياً، اضغط زر الإنهاء الذي يحمل رقمها.`, COLORS.info);
+  for (const task of result.items) e.addFields({
+    name: `${status[task.status] || '•'} #${task.id} — ${trim(task.title, 150)}`,
+    value: `الموعد: ${task.due_date ? tsDate(task.due_date) : 'بدون موعد محدد'}\n${trim(task.description || 'لا توجد تفاصيل إضافية.', 700)}`,
+  });
+  e.setFooter({ text: `صفحة ${result.page}/${result.pages} • إكمال التأهيل يتبعه اعتماد المدير قبل تفعيل الحالة النشطة` });
+  const buttons = result.items.filter(t => t.status === 'pending').map(t => new ButtonBuilder()
+    .setCustomId(`task:complete:${t.id}:${result.page}:${includeCompleted ? 1 : 0}`).setLabel(`إنهاء #${t.id}`).setEmoji('✅').setStyle(ButtonStyle.Secondary));
+  const components = buttons.length ? [new ActionRowBuilder().addComponents(buttons)] : [];
+  if (result.pages > 1) components.push(navRow({ prefix: 'task:page', page: result.page, pages: result.pages, args: [includeCompleted ? '1' : '0'] }));
+  components.push(homeRow());
+  return { embeds: [e], components };
 }
 
 module.exports = {
@@ -65,11 +74,12 @@ module.exports = {
     },
   ],
   components: {
-    'task:complete': async (i, [id]) => {
+    'task:page': async (i, [page, completed]) => i.update(taskPayload(i.user.id, completed === '1', page)),
+    'task:complete': async (i, [id, page, completed]) => {
       const task = tasks.complete(Number(id), i.user.id);
       if (!task) return replyEphemeral(i, '❌ المهمة غير موجودة أو ليست لك أو أُنجزت مسبقاً.', COLORS.danger);
       audit.record({ action: 'task_completed', actorId: i.user.id, targetId: i.user.id, details: { taskId: task.id, title: task.title }, channelId: i.channelId });
-      return i.update(taskPayload(i.user.id));
+      return i.update(taskPayload(i.user.id, completed === '1', page));
     },
   },
   taskPayload,

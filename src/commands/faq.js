@@ -1,7 +1,7 @@
 'use strict';
+const forms = require('../ui/forms');
 const {
-  SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle,
-  ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType,
+  SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ChannelType,
 } = require('discord.js');
 const { LEVELS, FAQ_CATEGORIES } = require('../constants');
 const faq = require('../services/faq');
@@ -167,17 +167,94 @@ function parseEntryIds(raw) {
   return ids;
 }
 
-const templateModal = (id, prefill = {}) => {
-  const m = new ModalBuilder().setCustomId(id ? `faq:template-editmodal:${id}` : 'faq:template-addmodal')
-    .setTitle(id ? `تعديل قالب #${id}` : 'إنشاء قالب FAQ');
-  m.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('اسم القالب (داخلي)').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(prefill.name || '')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('title').setLabel('عنوان اللوحة').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(prefill.title || '')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('وصف اللوحة').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false).setValue(prefill.description || '')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('categories').setLabel('التصنيفات: all أو أرقام مثل 1,3,9').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setValue(prefill.categoryIds?.join(',') || 'all')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('color').setLabel('لون #RRGGBB وملاحظة اللوحة (اختياري)').setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(false).setValue(prefill.color != null ? `#${Number(prefill.color).toString(16).padStart(6, '0')}` : '#5865F2')),
-  );
-  return m;
+/* ===== نماذج قاعدة المعرفة ===== */
+const categoryOptions = FAQ_CATEGORIES.map(c => ({ label: c.name, value: String(c.id), description: c.desc }));
+/** خيارات المدخلات لقوائم التثبيت/الإخفاء: الاسم بدل الرقم، مع احتياط نصي إن زادت عن 25. */
+const entryOptions = (entries, picked = []) => entries.slice(0, 25).map(e => ({
+  label: `#${e.id} — ${truncate(e.title, 60)}`,
+  value: String(e.id),
+  ...(picked.includes(e.id) ? { description: 'مثبّت حالياً' } : {}),
+}));
+
+const modals = {
+  template: ({ id, prefill = {} } = {}) => ({
+    id: id ? `faq:template-editmodal:${id}` : 'faq:template-addmodal',
+    title: id ? `✏️ تعديل قالب #${id}` : '🆕 إنشاء قالب FAQ',
+    fields: [
+      forms.field({ id: 'name', label: 'اسم القالب', max: 80, value: prefill.name,
+        description: 'اسم داخلي للتمييز بين القوالب؛ لا يظهر للأعضاء.' }),
+      forms.field({ id: 'title', label: 'عنوان اللوحة', max: 256, value: prefill.title,
+        description: 'العنوان الذي يظهر للأعضاء أعلى اللوحة.' }),
+      forms.field({ id: 'description', label: 'وصف اللوحة', required: false, style: 'paragraph', max: 1000, value: prefill.description,
+        description: 'اختياري: سطر يشرح محتوى اللوحة تحت العنوان.' }),
+      forms.select({ id: 'categories', label: 'التصنيفات الظاهرة', options: [{ label: 'كل التصنيفات', value: 'all' }, ...categoryOptions],
+        multiple: true, max: FAQ_CATEGORIES.length + 1, values: (prefill.categoryIds || []).map(String),
+        description: 'اختيار «كل التصنيفات» يتقدم على أي اختيار آخر.' }),
+      forms.field({ id: 'color', label: 'لون اللوحة', max: 20,
+        value: prefill.color != null ? `#${Number(prefill.color).toString(16).padStart(6, '0')}` : '#5865F2',
+        description: 'صيغة Hex مثل #5865F2.', placeholder: '#5865F2' }),
+    ],
+    note: 'القالب يحدد ما يراه الأعضاء في الروم؛ يمكن تثبيت مدخلات أو إخفاؤها لاحقاً من أزرار القالب.',
+  }),
+  entry: ({ id, prefill = {} } = {}) => ({
+    id: id ? `faq:editmodal:${id}` : 'faq:addmodal',
+    title: id ? `✏️ تعديل المدخل #${id}` : '🆕 إضافة مدخل',
+    fields: [
+      forms.field({ id: 'title', label: 'عنوان المدخل', max: 100, value: prefill.title,
+        description: 'عنوان قصير يظهر في قائمة المدخلات والبحث.' }),
+      forms.field({ id: 'content', label: 'المحتوى', style: 'paragraph', max: 4000, value: prefill.content,
+        description: 'التعليمات كاملة. يدعم تنسيق ديسكورد (غامق، قوائم، روابط).' }),
+      forms.select({ id: 'category', label: 'التصنيف', options: categoryOptions,
+        values: prefill.category_id ? [String(prefill.category_id)] : [],
+        description: 'اختر التصنيف بالاسم؛ يُحدد مكان ظهور المدخل في اللوحة.' }),
+      forms.select({ id: 'important', label: 'يحتاج تأكيد قراءة؟', required: true,
+        options: [
+          { label: 'نعم — تعليمات مهمة', value: 'نعم', description: 'يجب أن يضغط العضو «تم القراءة».' },
+          { label: 'لا — مرجع اختياري', value: 'لا' },
+        ],
+        values: [prefill.is_important ? 'نعم' : 'لا'],
+        description: 'المدخلات المهمة تظهر للأعضاء حتى يؤكدوا قراءتها.' }),
+    ],
+    note: 'أي تعديل يرفع إصدار المدخل ويطلب من الأعضاء تأكيد القراءة من جديد إن كان مهماً.',
+  }),
+  search: ({ templateId } = {}) => ({
+    id: `faq:searchmodal${Number(templateId) ? `:${Number(templateId)}` : ''}`,
+    title: '🔍 بحث في قاعدة المعرفة',
+    fields: [
+      forms.field({ id: 'q', label: 'كلمة البحث', min: 2, max: 60,
+        description: 'ابحث في العنوان والمحتوى، مثل «إجازة» أو «تكت».' }),
+    ],
+    note: 'البحث يحترم قالب هذا الروم: لا يعرض المدخلات المخفية فيه.',
+  }),
+  pin: ({ id, entries = [], current = [] } = {}) => ({
+    id: `faq:cfgpinmodal:${id}`,
+    title: `📌 تثبيت مدخلات — قالب #${id}`,
+    fields: entries.length && entries.length <= 25
+      ? [forms.select({ id: 'ids', label: 'المدخلات التي تُعرض أولاً', options: entryOptions(entries, current), multiple: true, required: false,
+          values: current.map(String), description: 'التثبيت يرفع المدخلات للأعلى ولا يمنع بقية المدخلات من الظهور.' })]
+      : [forms.field({ id: 'ids', label: entries.length ? 'أرقام المدخلات' : 'لا توجد مدخلات بعد', max: 200, required: entries.length > 0,
+          description: entries.length ? 'المدخلات كثيرة: اكتب الأرقام مفصولة بفواصل مثل 3, 7, 12.' : 'أضف مدخلاً للقالب أولاً، ثم ثبّته من هنا.' })],
+    note: entries.length <= 25 ? 'اختر حتى 25 مدخلاً، ويمكن تعديل الاختيار لاحقاً.' : undefined,
+  }),
+  hide: ({ id, entries = [], current = [] } = {}) => ({
+    id: `faq:cfghidemodal:${id}`,
+    title: `🙈 إخفاء مدخلات — قالب #${id}`,
+    fields: entries.length && entries.length <= 25
+      ? [forms.select({ id: 'ids', label: 'المدخلات المخفية في هذا القالب', options: entryOptions(entries), multiple: true, required: false,
+          values: current.map(String), description: 'الإخفاء يخص هذا القالب فقط ولا يحذف المدخل.' })]
+      : [forms.field({ id: 'ids', label: entries.length ? 'أرقام المدخلات المخفية' : 'لا توجد مدخلات بعد', max: 200, required: entries.length > 0,
+          description: entries.length ? 'اكتب الأرقام مفصولة بفواصل مثل 3, 7, 12.' : 'لا يوجد ما يمكن إخفاؤه في هذا القالب حالياً.' })],
+    note: 'استخدم «مسح التثبيت والإخفاء» لترتيب القالب من جديد.',
+  }),
+  note: ({ id, current } = {}) => ({
+    id: `faq:cfgenotemodal:${id}`,
+    title: `ℹ️ ملاحظة اللوحة — قالب #${id}`,
+    fields: [
+      forms.field({ id: 'note', label: 'نص أعلى اللوحة', required: false, style: 'paragraph', max: 500, value: current,
+        description: 'يظهر في هذا الروم فقط. اتركه فارغاً لمسح الملاحظة.' }),
+    ],
+    note: 'الملاحظة تُحدَّث في اللوحة فوراً دون تغيير المدخلات.',
+  }),
 };
 
 function readTemplateFields(i) {
@@ -202,18 +279,8 @@ async function notifyUpdate(client, action, entry, userId) {
   await refreshPanels(client);
 }
 
-const entryModal = (id, prefill = {}) => {
-  const m = new ModalBuilder().setCustomId(id ? `faq:editmodal:${id}` : 'faq:addmodal').setTitle(id ? `تعديل المدخل #${id}` : 'إضافة مدخل FAQ');
-  m.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('title').setLabel('العنوان').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(true).setValue(prefill.title || '')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('content').setLabel('المحتوى').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true).setValue(prefill.content || '')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('category').setLabel('رقم التصنيف (1-11)').setStyle(TextInputStyle.Short).setMaxLength(2).setRequired(true).setValue(String(prefill.category_id || ''))),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('important').setLabel('مهم؟ يتطلب تأكيد قراءة (نعم/لا)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(false).setValue(prefill.is_important ? 'نعم' : 'لا')),
-  );
-  return m;
-};
-
 module.exports = {
+  modals,
   commands: [
     {
       data: new SlashCommandBuilder().setName('faq').setDescription('عرض قاعدة المعرفة (القوانين والتعليمات)')
@@ -237,7 +304,7 @@ module.exports = {
     {
       data: new SlashCommandBuilder().setName('faq-add').setDescription('إضافة مدخل جديد إلى قاعدة المعرفة'),
       level: LEVELS.MANAGEMENT,
-      async execute(i) { return i.showModal(entryModal(null)); },
+      async execute(i) { return forms.open(i, modals.entry()); },
     },
     {
       data: new SlashCommandBuilder().setName('faq-edit').setDescription('تعديل مدخل في قاعدة المعرفة')
@@ -246,7 +313,7 @@ module.exports = {
       async execute(i) {
         const entry = faq.get(i.options.getInteger('id'));
         if (!entry) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
-        return i.showModal(entryModal(entry.id, entry));
+        return forms.open(i, modals.entry({ id: entry.id, prefill: entry }));
       },
     },
     {
@@ -274,7 +341,7 @@ module.exports = {
     {
       data: new SlashCommandBuilder().setName('faq-template-create').setDescription('إنشاء قالب FAQ مستقل (لكل روم قالب)'),
       level: LEVELS.MANAGEMENT,
-      async execute(i) { return i.showModal(templateModal()); },
+      async execute(i) { return forms.open(i, modals.template()); },
     },
     {
       data: new SlashCommandBuilder().setName('faq-template-list').setDescription('عرض قوالب FAQ المستقلة'),
@@ -295,7 +362,7 @@ module.exports = {
       async execute(i) {
         const t = faq.template(i.options.getInteger('id'));
         if (!t || t.id === 0) return replyEphemeral(i, '❌ القالب غير موجود أو لا يمكن تعديل الافتراضي.', COLORS.danger);
-        return i.showModal(templateModal(t.id, t));
+        return forms.open(i, modals.template({ id: t.id, prefill: t }));
       },
     },
     {
@@ -412,12 +479,7 @@ module.exports = {
       const e = entries.length ? listEmbed(entries, `📌 ${t.name} — مدخلات مهمة لم تقرأها بعد`, { templateId: t.id }).setColor(COLORS.warning) : embed('✅ ممتاز', 'قرأت كل المدخلات المهمة في هذا القالب.', COLORS.success);
       return i.reply({ embeds: [e], components: entrySelectRow(entries, t.id, 'اختر مدخلاً لقراءته وتأكيده...'), ephemeral: true });
     },
-    'faq:search': async (i, [templateId]) => {
-      const suffix = Number(templateId) ? `:${Number(templateId)}` : '';
-      const m = new ModalBuilder().setCustomId(`faq:searchmodal${suffix}`).setTitle('🔍 بحث في قاعدة المعرفة');
-      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q').setLabel('كلمة البحث').setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(60).setRequired(true)));
-      return i.showModal(m);
-    },
+    'faq:search': async (i, [templateId]) => forms.open(i, modals.search({ templateId })),
     'faq:searchmodal': async (i, [templateId]) => {
       const t = templateOrDefault(templateId);
       const q = i.fields.getTextInputValue('q');
@@ -494,9 +556,10 @@ module.exports = {
 
     // ===== متقدّم: تثبيت/إخفاء/ملاحظة =====
     'faq:cfgpin': async (i, [id]) => {
-      const m = new ModalBuilder().setCustomId(`faq:cfgpinmodal:${id}`).setTitle(`📌 تثبيت مدخلات — قالب #${id}`);
-      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ids').setLabel('أرقام المدخلات (مثل: 3, 7, 12) — تُعرض أولاً').setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(true).setValue((faq.template(Number(id))?.pinnedIds || []).join(', '))));
-      return i.showModal(m);
+      const t = faq.template(Number(id));
+      const entries = faq.listForTemplate(Number(id));
+      if (!entries.length) return replyEphemeral(i, 'ℹ️ لا توجد مدخلات في هذا القالب بعد — أضف مدخلاً ثم ثبّته.', COLORS.gray);
+      return forms.open(i, modals.pin({ id, entries, current: t?.pinnedIds || [] }));
     },
     'faq:cfgpinmodal': async (i, [id]) => {
       const ids = parseEntryIds(i.fields.getTextInputValue('ids'));
@@ -508,9 +571,10 @@ module.exports = {
       return refreshPanels(i.client, t.id);
     },
     'faq:cfghide': async (i, [id]) => {
-      const m = new ModalBuilder().setCustomId(`faq:cfghidemodal:${id}`).setTitle(`🙈 إخفاء مدخلات — قالب #${id}`);
-      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ids').setLabel('أرقام المدخلات المخفية في هذا القالب فقط').setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(true).setValue((faq.template(Number(id))?.excludedIds || []).join(', '))));
-      return i.showModal(m);
+      const t = faq.template(Number(id));
+      const entries = faq.listForTemplate(Number(id));
+      if (!entries.length) return replyEphemeral(i, 'ℹ️ لا يوجد ما يمكن إخفاؤه في هذا القالب حالياً.', COLORS.gray);
+      return forms.open(i, modals.hide({ id, entries, current: t?.excludedIds || [] }));
     },
     'faq:cfghidemodal': async (i, [id]) => {
       const ids = parseEntryIds(i.fields.getTextInputValue('ids'));
@@ -522,10 +586,7 @@ module.exports = {
       return refreshPanels(i.client, t.id);
     },
     'faq:cfgnote': async (i, [id]) => {
-      const t = faq.template(Number(id));
-      const m = new ModalBuilder().setCustomId(`faq:cfgenotemodal:${id}`).setTitle(`ℹ️ ملاحظة اللوحة — قالب #${id}`);
-      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note').setLabel('نص يظهر أعلى اللوحة في هذا الروم فقط').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(false).setValue(t?.note || '')));
-      return i.showModal(m);
+      return forms.open(i, modals.note({ id, current: faq.template(Number(id))?.note || '' }));
     },
     'faq:cfgenotemodal': async (i, [id]) => {
       const note = (i.fields.getTextInputValue('note') || '').trim();

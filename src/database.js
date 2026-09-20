@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS staff_members (
 );
 
 -- تاريخ الرتب: الترقيات والتنزيلات والإزالة — كانت الرتب تُكتب فوق نفسها فلا يمكن
--- الإجابة على «من رقّى مَن ومتى؟» (راجع ROADMAP 2.1)
+-- الإجابة على «من رقّى مَن ومتى؟»
 CREATE TABLE IF NOT EXISTS staff_rank_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS staff_rank_history (
 );
 CREATE INDEX IF NOT EXISTS idx_rank_history_user ON staff_rank_history(user_id, created_at);
 
--- تجميع شهري للنشاط: يبقى بعد تقليم السجلات الخام (راجع ROADMAP 2.3)
+-- تجميع شهري للنشاط: يبقى بعد تقليم السجلات الخام
 CREATE TABLE IF NOT EXISTS activity_monthly (
   user_id TEXT NOT NULL,
   month TEXT NOT NULL,           -- YYYY-MM
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS activity_monthly (
   PRIMARY KEY (user_id, month)
 );
 
--- نتيجة فحص سلامة كل نسخة احتياطية: نسخة لم تُختبر ليست نسخة (راجع ROADMAP 2.4)
+-- نتيجة فحص سلامة كل نسخة احتياطية: نسخة لم تُختبر ليست نسخة
 CREATE TABLE IF NOT EXISTS backup_checks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   path TEXT NOT NULL,
@@ -95,6 +95,21 @@ CREATE TABLE IF NOT EXISTS ticket_metrics (
   closed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ticket_claimer ON ticket_metrics(claimer, closed_at);
+
+-- تقييمات مستقلة عن التكتات: لا يمكن ربط الرسالة بتكت بدون معرف موثوق.
+CREATE TABLE IF NOT EXISTS support_ratings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id TEXT NOT NULL,
+  reviewer_id TEXT NOT NULL,
+  stars INTEGER NOT NULL CHECK(stars BETWEEN 1 AND 5),
+  source_message_id TEXT NOT NULL UNIQUE,
+  source_channel_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  source_bot_id TEXT NOT NULL,
+  rated_at TEXT NOT NULL,
+  imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_ratings_staff_date ON support_ratings(staff_id, rated_at);
 
 CREATE TABLE IF NOT EXISTS mod_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -438,6 +453,10 @@ function migrate(database) {
   addTableColumns('staff_members', [['suspended_until', 'TEXT'], ['onboarding_ready', 'INTEGER NOT NULL DEFAULT 0'], ['onboarding_approved_by', 'TEXT'], ['onboarding_approved_at', 'TEXT']]);
   addTableColumns('warnings', [['voided_at', 'TEXT'], ['voided_by', 'TEXT'], ['void_reason', 'TEXT']]);
   addTableColumns('ticket_metrics', [['duration_source', 'TEXT'], ['claimed_at', 'TEXT']]);
+  // اقتراح تواريخ بديلة من المراجع: لا يغيّر الحالة، ويصل لصاحب الطلب كرسالة خاصة.
+  addTableColumns('leave_requests', [['suggested_start', 'TEXT'], ['suggested_end', 'TEXT'], ['suggested_note', 'TEXT'], ['suggested_by', 'TEXT'], ['suggested_at', 'TEXT'],
+    // كان يُستخدم في التمديد وقبول الاقتراح دون أن يوجد العمود → خطأ SQL عند التمديد.
+    ['updated_at', 'TEXT']]);
   addTableColumns('staff_tasks', [['cancelled_by', 'TEXT'], ['cancelled_at', 'TEXT'], ['reminder_sent_at', 'TEXT']]);
   // تاريخ آخر تقييم بشري: يمنع الاعتماد على تقييم قديم لا يصف الحاضر
   addTableColumns('staff_members', [['human_ratings_at', 'TEXT']]);

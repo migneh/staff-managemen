@@ -1,5 +1,6 @@
 'use strict';
-const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const forms = require('../ui/forms');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const { LEVELS, RESIGNATION_REASONS, RESIGNATION_GLOBAL } = require('../constants');
 const settings = require('../services/settings');
 const { getDb } = require('../database');
@@ -67,7 +68,7 @@ async function decide(i, id, status) {
   const db = getDb();
   const r = db.prepare('SELECT * FROM resignations WHERE id = ?').get(Number(id));
   if (!r || !['pending', 'on_hold'].includes(r.status)) return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
-  const reason = i.fields ? (i.fields.getTextInputValue('reason') || '').trim() || null : null;
+  const reason = i.fields ? (forms.combine(i) || null) : null;
   const exitInterview = i.fields && i.fields.fields?.has?.('exit_interview') ? (i.fields.getTextInputValue('exit_interview') || '').trim() || null : null;
 
   // تحديث الحالة + مقابلة الخروج إن وجدت
@@ -129,18 +130,63 @@ async function decide(i, id, status) {
   return log(i.client, `📤 استقالة: ${STATUS_AR[status]}`, `<@${r.user_id}> — #${r.id} بواسطة <@${i.user.id}>`, color);
 }
 
-const reasonModal = (id, action, title) => {
-  const m = new ModalBuilder().setCustomId(`resign:${action}modal:${id}`).setTitle(title);
-  if (action === 'accept') {
-    m.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('رسالة وداع (اختياري)').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(false)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('exit_interview').setLabel('ملاحظة مقابلة الخروج — اختياري').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(false)),
-    );
-  } else {
-    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel(action === 'reject' ? 'سبب الرفض' : 'ملاحظة التعليق').setStyle(TextInputStyle.Paragraph).setMaxLength(400).setRequired(action === 'reject')));
-    if (action !== 'reject') m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('exit_interview').setLabel('مقابلة الخروج — اختياري').setStyle(TextInputStyle.Paragraph).setMaxLength(400).setRequired(false)));
-  }
-  return m;
+const modals = {
+  /** نماذج قرار الاستقالة: القبول والرفض والتعليق. */
+  decide: ({ id, action } = {}) => ({
+    id: `resign:${action}modal:${id}`,
+    title: action === 'accept' ? '✅ قبول الاستقالة — رسالة وداع'
+      : action === 'reject' ? '❌ سبب رفض الاستقالة' : '⏸️ تعليق — ملاحظة للإداري',
+    fields: action === 'accept' ? [
+      forms.field({ id: 'reason', label: 'رسالة وداع للعضو', required: false, style: 'paragraph', max: 500,
+        description: 'اختياري: نص إيجابي يُرسل للعضو مع إشعار القبول.' }),
+      forms.field({ id: 'exit_interview', label: 'ملاحظة مقابلة الخروج', required: false, style: 'paragraph', max: 500,
+        description: 'اختياري: خلاصة المقابلة تُحفظ مع الطلب وتظهر في السجل.' }),
+    ] : action === 'reject' ? [
+      forms.select({ id: 'preset', label: 'أسباب جاهزة', required: false, multiple: true,
+        options: [
+          { label: 'فترة إشعار غير مكتملة', value: 'فترة الإشعار غير مكتملة' },
+          { label: 'تسليم المهام ناقص', value: 'مهام التسليم لم تكتمل' },
+          { label: 'يحتاج مناقشة أولاً', value: 'يحتاج مناقشة قبل القبول' },
+          { label: 'قرار نهائي من الطرفين', value: 'قرار نهائي متفق عليه' },
+        ],
+        description: 'اختر سبباً أو أكثر، أو اكتب سبباً مخصصاً في الحقل التالي.' }),
+      forms.field({ id: 'reason', label: 'سبب مخصص', required: false, style: 'paragraph', max: 400,
+        description: 'يظهر هذا النص للعضو في رسالة الرفض.' }),
+    ] : [
+      forms.field({ id: 'reason', label: 'ملاحظة التعليق', required: false, style: 'paragraph', max: 400,
+        description: 'اختياري: سبب طلب المقابلة أو ما تنتظره من العضو.' }),
+      forms.field({ id: 'exit_interview', label: 'مقابلة الخروج', required: false, style: 'paragraph', max: 400,
+        description: 'اختياري: ملاحظات أولية تُحفظ قبل المقابلة.' }),
+    ],
+    note: 'يُبلَّغ العضو فوراً في الخاص، ويُسجَّل القرار معك في سجل التدقيق.',
+  }),
+  /** نموذج تقديم الاستقالة نفسه. */
+  request: ({ cat, noticeDays = 0, label = '', emoji = '' } = {}) => ({
+    id: `resign:modal:${cat}`,
+    title: `${emoji} استقالة — ${label}`.trim(),
+    fields: [
+      forms.field({ id: 'reason', label: 'التفاصيل — ما السبب تحديداً؟', style: 'paragraph', max: 800,
+        description: 'اشرح سبب الاستقالة بصراحة؛ يفيدنا ذلك في تحسين بيئة الفريق.' }),
+      forms.field({ id: 'last_day', label: 'آخر يوم عمل', max: 20,
+        description: `سنة-شهر-يوم. المطلوب إشعار ${noticeDays} أيام على الأقل، ويقبل «اليوم» و«غدا».`,
+        placeholder: today() }),
+      forms.field({ id: 'notes', label: 'ملاحظات أو اقتراح بديل', required: false, style: 'paragraph', max: 400,
+        description: 'اختياري: ما الذي قد يجعلك تتراجع؟ الفريق يقدر أي حل وسط.' }),
+      forms.field({ id: 'remove_at', label: 'تاريخ إزالة الرتب', required: false, max: 20,
+        description: 'اختياري: سنة-شهر-يوم. اتركه فارغاً لإزالة الرتب فور القبول.', placeholder: 'فارغ = فور القبول' }),
+    ],
+    note: 'يمكنك سحب الطلب قبل القبول، وتُفتح مهام التسليم تلقائياً عند القبول.',
+  }),
+  /** ملاحظات مقابلة الخروج لاحقاً. */
+  interview: ({ id } = {}) => ({
+    id: `resign:interviewmodal:${id}`,
+    title: `📝 مقابلة خروج #${id}`,
+    fields: [
+      forms.field({ id: 'exit_interview', label: 'ملاحظات المقابلة', style: 'paragraph', max: 600,
+        description: 'ما قاله العضو في المقابلة، وما يمكن أن يستفيد منه الفريق.' }),
+    ],
+    note: 'تُحدَّث الملاحظات في بطاقة الطلب دون تغيير حالته.',
+  }),
 };
 
 function withdrawEmbed(rows, page = 1) {
@@ -163,6 +209,7 @@ function withdrawEmbed(rows, page = 1) {
 }
 
 module.exports = {
+  modals,
   commands: [
     {
       data: new SlashCommandBuilder().setName('resign').setDescription('تقديم طلب استقالة — سري مع تصنيف السبب'),
@@ -283,15 +330,7 @@ module.exports = {
       const cat = i.values[0];
       const info = RESIGNATION_REASONS[cat];
       if (!info) return replyEphemeral(i, '❌ تصنيف غير صحيح.', COLORS.danger);
-      const policy = settings.resignationPolicy();
-      const m = new ModalBuilder().setCustomId(`resign:modal:${cat}`).setTitle(`${info.emoji} استقالة — ${info.label}`);
-      m.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('التفاصيل — ما السبب تحديداً؟').setStyle(TextInputStyle.Paragraph).setMaxLength(800).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('last_day').setLabel(`آخر يوم YYYY-MM-DD — إشعار ${policy.noticeDays} أيام`).setStyle(TextInputStyle.Short).setMaxLength(10).setRequired(true).setPlaceholder(today())),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('ملاحظات / اقتراح بديل — اختياري').setStyle(TextInputStyle.Paragraph).setMaxLength(400).setRequired(false)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remove_at').setLabel('تاريخ إزالة الرتب (اختياري) — YYYY-MM-DD').setStyle(TextInputStyle.Short).setMaxLength(10).setRequired(false).setPlaceholder('فارغ = فور القبول')),
-      );
-      return i.showModal(m);
+      return forms.open(i, modals.request({ cat, noticeDays: settings.resignationPolicy().noticeDays, label: info.label, emoji: info.emoji }));
     },
     'resign:modal': async (i, [cat]) => {
       const reasonCat = RESIGNATION_REASONS[cat] ? cat : 'other';
@@ -355,26 +394,24 @@ module.exports = {
     },
     'resign:accept': async (i, [id]) => {
       if (i.staffLevel < LEVELS.BOSS) return replyEphemeral(i, '❌ قبول الاستقالة من صلاحية Boss فقط.', COLORS.danger);
-      return i.showModal(reasonModal(id, 'accept', '✅ قبول الاستقالة — رسالة وداع'));
+      return forms.open(i, modals.decide({ id, action: 'accept' }));
     },
     'resign:acceptmodal': async (i, [id]) => { if (i.staffLevel < LEVELS.BOSS) return replyEphemeral(i, '❌ Boss فقط.', COLORS.danger); return decide(i, id, 'accepted'); },
     'resign:reject': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
-      return i.showModal(reasonModal(id, 'reject', '❌ سبب رفض الاستقالة'));
+      return forms.open(i, modals.decide({ id, action: 'reject' }));
     },
     'resign:rejectmodal': async (i, [id]) => { if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger); return decide(i, id, 'rejected'); },
     'resign:hold': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
-      return i.showModal(reasonModal(id, 'hold', '⏸️ تعليق — ملاحظة للإداري'));
+      return forms.open(i, modals.decide({ id, action: 'hold' }));
     },
     'resign:holdmodal': async (i, [id]) => { if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger); return decide(i, id, 'on_hold'); },
     'resign:interview': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
       const r = getDb().prepare('SELECT * FROM resignations WHERE id=?').get(Number(id));
       if (!r) return replyEphemeral(i, '❌ الطلب غير موجود.', COLORS.danger);
-      const m = new ModalBuilder().setCustomId(`resign:interviewmodal:${id}`).setTitle(`📝 مقابلة خروج #${id}`);
-      m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('exit_interview').setLabel('ملاحظات المقابلة').setStyle(TextInputStyle.Paragraph).setMaxLength(600).setRequired(true).setValue(r.exit_interview || '')));
-      return i.showModal(m);
+      return forms.open(i, modals.interview({ id }), { values: { exit_interview: r.exit_interview } });
     },
     'resign:interviewmodal': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);

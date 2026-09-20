@@ -126,6 +126,9 @@ function leavePolicy(type = null) {
     maxDays: policy('leaveMaxDays'), maxConcurrent: policy('leaveMaxConcurrent'),
     pendingExpireDays: policy('leavePendingExpireDays'), maxDaysPer90: policy('leaveMaxDaysPer90'),
     vacationRoleTiming: policy('vacationRoleTiming', base.vacationRoleTiming || 'at_start'),
+    annualDays: policy('leaveAnnualDays'), teamCover: policy('leaveTeamCover'),
+    enforceTeamCover: policy('leaveEnforceTeamCover'), pendingEscalateHours: policy('leavePendingEscalateHours'),
+    workdayCounting: policy('leaveWorkdayCounting'), weeklyOff: policy('leaveWeeklyOff'),
   };
   for (const [k, v] of Object.entries(overrides)) if (v != null) base[k] = v;
   const result = type ? { ...base, ...(rules[type] || {}), rules } : { ...base, rules };
@@ -134,6 +137,14 @@ function leavePolicy(type = null) {
   result.maxDaysPer90 = Number(result.maxDaysPer90) || LEAVE_GLOBAL.maxDaysPer90;
   result.pendingExpireDays = Number(result.pendingExpireDays) || LEAVE_GLOBAL.pendingExpireDays;
   result.minNoticeHours = Number(result.minNoticeHours || 0);
+  result.annualDays = Math.max(0, Math.trunc(Number(result.annualDays) || 0));
+  result.teamCover = Math.max(0, Math.trunc(Number(result.teamCover ?? LEAVE_GLOBAL.teamCover)));
+  result.pendingEscalateHours = Math.max(0, Math.trunc(Number(result.pendingEscalateHours ?? LEAVE_GLOBAL.pendingEscalateHours)));
+  result.enforceTeamCover = !!result.enforceTeamCover;
+  result.workdayCounting = !!result.workdayCounting;
+  result.weeklyOff = (Array.isArray(result.weeklyOff) ? result.weeklyOff : [])
+    .map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+  result.weeklyOffDays = result.weeklyOff; // اسم موازٍ للوضوح في الواجهات
   return result;
 }
 
