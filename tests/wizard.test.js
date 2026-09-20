@@ -11,7 +11,7 @@ const forms = require('../src/ui/forms');
 const wizard = require('../src/commands/wizard');
 const { commands, resolveComponent } = require('../src/commands');
 const { dispatch } = require('../src/services/componentDispatch');
-const { LEVELS } = require('../src/constants');
+const { LEVELS, FAQ_CATEGORIES } = require('../src/constants');
 const IDS = { user: '1005171993940852796', target: '1490787800168005713', channel: '223456789012345678', guild: '323456789012345678' };
 let next = 1n;
 
@@ -69,11 +69,12 @@ test('كل نموذج مُحوَّل إلى Label يحمل وصفاً مفيدا
   }
   const entry = forms.modernize(samples[2]).toJSON().components;
   assert.equal(entry[2].component.type, ComponentType.StringSelect, 'التصنيف يجب أن يصبح قائمة');
-  assert.equal(entry[2].component.options.length, 11);
+  assert.equal(entry[2].component.options.length, FAQ_CATEGORIES.length, 'عدد التصنيفات في القائمة = عدد التصنيفات الفعلية');
+  assert.equal(entry[2].component.options.filter(o => o.value === '2').length, 1);
   assert(entry[3].component.options.some(o => o.value === 'نعم'));
   const template = forms.modernize(samples[3]).toJSON().components;
-  assert.equal(template[3].component.max_values, 11, 'اختيار «كل التصنيفات» لا يزيد الحد عن عدد التصنيفات');
-  assert.equal(template[3].component.options.length, 12);
+  assert.equal(template[3].component.max_values, FAQ_CATEGORIES.length, 'اختيار «كل التصنيفات» لا يزيد الحد عن عدد التصنيفات');
+  assert.equal(template[3].component.options.length, FAQ_CATEGORIES.length + 1);
   assert(template[3].component.options.some(o => o.value === 'all' && o.default === false));
   assert.equal(template[4].component.max_length, 100);
 });

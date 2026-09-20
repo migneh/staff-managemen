@@ -488,6 +488,56 @@ function migrate(database) {
   ) AND ref_id IS NOT NULL`);
   database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_points_unique_ref
     ON promotion_points(reason_key, COALESCE(ref_type,''), ref_id) WHERE ref_id IS NOT NULL`);
+
+  migrateFaqCategories(database);
+}
+
+/**
+ * ترحيل تصنيفات FAQ: أُزيل تصنيف «قوانين فريق الإشراف» (2) ودُمجت مدخلاته في
+ * «قوانين الإدارة» (1)، وأُعيد ترقيم ما بعده ليبقى الترقيم متصلاً 1..10.
+ *
+ * يعمل مرة واحدة فقط (علامة في جدول settings) حتى لا يُعاد الترقيم مرتين،
+ * وكل التغييرات داخل معاملة واحدة: إمّا أن تكتمل أو لا يحدث شيء.
+ * جداول السجل (faq_history وfaq_template_history) لا تُمسّ — تبقى كما كُتبت وقتها.
+ */
+const FAQ_CATEGORY_REMAP = { 1: 1, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8, 10: 9, 11: 10 };
+const FAQ_MIGRATION_KEY = 'schema_faq_categories';
+const FAQ_MIGRATION_VERSION = '2';
+
+function migrateFaqCategories(database) {
+  const done = database.prepare('SELECT value FROM settings WHERE key = ?').get(FAQ_MIGRATION_KEY);
+  if (done?.value === FAQ_MIGRATION_VERSION) return;
+
+  const parseIds = (raw) => {
+    try { const v = JSON.parse(raw || '[]'); return Array.isArray(v) ? v.map(Number) : []; } catch { return []; }
+  };
+  const remap = (ids) => [...new Set(ids.map(id => FAQ_CATEGORY_REMAP[id]).filter(id => Number.isInteger(id)))];
+
+  const run = database.transaction(() => {
+    const entries = database.prepare('SELECT id, category_id FROM faq_entries').all();
+    const moveEntry = database.prepare('UPDATE faq_entries SET category_id = ? WHERE id = ?');
+    let moved = 0;
+    for (const row of entries) {
+      const next = FAQ_CATEGORY_REMAP[row.category_id];
+      if (next != null && next !== row.category_id) { moveEntry.run(next, row.id); moved++; }
+    }
+    // قوالب FAQ تخزّن التصنيفات كمصفوفة JSON — نُعيد ترقيمها بالقاعدة نفسها،
+    // فالتصنيف المحذوف (2) يصبح «قوانين الإدارة» (1) بدل أن يختفي محتوى القالب.
+    const rows = database.prepare('SELECT id, category_ids FROM faq_templates').all();
+    const moveTemplate = database.prepare('UPDATE faq_templates SET category_ids = ? WHERE id = ?');
+    for (const row of rows) {
+      const before = parseIds(row.category_ids);
+      const after = remap(before);
+      if (JSON.stringify(before) !== JSON.stringify(after)) moveTemplate.run(JSON.stringify(after), row.id);
+    }
+    return moved;
+  });
+  const moved = run();
+
+  database.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+    .run(FAQ_MIGRATION_KEY, FAQ_MIGRATION_VERSION);
+  if (moved) console.log(`[migrate] FAQ: أُعيد ترقيم ${moved} مدخلاً بعد إزالة تصنيف «قوانين فريق الإشراف».`);
 }
 
 function getDb() {
@@ -510,4 +560,4 @@ function openMemoryDb() {
   return db;
 }
 
-module.exports = { getDb, openMemoryDb };
+module.exports = { getDb, openMemoryDb, migrateFaqCategories, FAQ_CATEGORY_REMAP };
