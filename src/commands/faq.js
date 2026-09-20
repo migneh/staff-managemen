@@ -7,36 +7,49 @@ const { LEVELS, FAQ_CATEGORIES } = require('../constants');
 const faq = require('../services/faq');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, truncate, sendToChannel } = require('../utils');
+const { isServerManager } = require('../services/permissions');
 const kit = require('../ui/kit');
 
 const categoryChoices = FAQ_CATEGORIES.map(c => ({ name: `${c.id}. ${c.name}`, value: c.id }));
 const allCategoryIds = () => FAQ_CATEGORIES.map(c => c.id);
+/** نطاق التصنيفات للرسائل — يُشتق من القائمة فلا يتقادم عند إضافة/حذف تصنيف. */
+const categoryRange = () => `1-${FAQ_CATEGORIES.length}`;
 
 function templateOrDefault(id) { return faq.template(Number(id) || 0) || faq.DEFAULT_TEMPLATE; }
+
+/** هل يملك هذا المتفاعل صلاحية إدارة قاعدة المعرفة؟ (لعرض زر السجل لمن يستخدمه فعلاً) */
+function canManage(i) {
+  const level = i.staffLevel || (isServerManager(i.member) ? LEVELS.GENERAL_MANAGER : 0);
+  return level >= LEVELS.MANAGEMENT;
+}
 
 // ===== بناء لوحة مستقلة لكل قالب =====
 function buildPanel(templateId = 0) {
   const t = templateOrDefault(templateId);
-  const categories = faq.templateCategories(t.id);
-  const counts = faq.counts(t.categoryIds);
   const entries = faq.listForTemplate(t.id);
+  // التصنيفات التي فيها مدخلات ظاهرة فقط — لا نعرض تصنيفاً فارغاً في اللوحة أو في القائمة.
+  const categories = faq.activeCategories(t.id, entries);
+  const emptyCategories = faq.templateCategories(t.id).length - categories.length;
   const important = entries.filter(x => x.is_important).length;
   const suffix = t.id ? `:${t.id}` : '';
   const noteLine = t.note ? `\n> ℹ️ ${t.note}` : '';
+  const catLines = categories.map(c => `\`${String(c.id).padStart(2, '0')}\` ${c.name} · **${c.count}**`);
   const e = embed(t.title, `${t.description || 'اختر تصنيفاً من القائمة لعرض المدخلات.'}${noteLine}`, t.color)
     .addFields(
-      { name: '📂 التصنيفات', value: categories.slice(0, 6).map(c => `\`${String(c.id).padStart(2, '0')}\` ${c.name} · **${counts[c.id] || 0}**`).join('\n') || 'لا توجد تصنيفات', inline: true },
-      { name: '\u200b', value: categories.slice(6).map(c => `\`${String(c.id).padStart(2, '0')}\` ${c.name} · **${counts[c.id] || 0}**`).join('\n') || '\u200b', inline: true },
+      { name: '📂 التصنيفات', value: catLines.slice(0, 6).join('\n') || '_لا توجد مدخلات بعد_', inline: true },
+      { name: '\u200b', value: catLines.slice(6).join('\n') || (emptyCategories ? `_… و${emptyCategories} تصنيف بلا مدخلات_` : '\u200b'), inline: true },
       { name: '\u200b', value: `📦 **${entries.length}** مدخل${t.pinnedIds.length ? ` · 📌 **${t.pinnedIds.length}** مثبت` : ''}${t.excludedIds.length ? ` · 🙈 **${t.excludedIds.length}** مخفي` : ''} • ❗ **${important}** يتطلب تأكيد قراءة` },
     );
   if (t.id) e.setFooter({ text: `قالب #${t.id} — ${t.name} • تتحدث لوحات هذا القالب فقط عند تعديله` });
   else e.setFooter({ text: 'اللوحة الافتراضية • تتحدث عند تعديل أي مدخل' });
 
-  const hasEntries = entries.length > 0;
+  const hasEntries = categories.length > 0;
   const menu = new StringSelectMenuBuilder().setCustomId(`faq:cat${suffix}`)
     .setPlaceholder(hasEntries ? '📂 اختر التصنيف...' : 'لا توجد مدخلات في هذا القالب')
     .setDisabled(!hasEntries)
-    .addOptions(hasEntries ? categories.map(c => ({ label: c.name, value: String(c.id), description: truncate(c.desc, 90), emoji: '📄' })) : [{ label: 'لا يوجد', value: '0', description: 'القالب فارغ' }]);
+    .addOptions(hasEntries
+      ? categories.map(c => ({ label: c.name, value: String(c.id), description: truncate(`${c.desc} · ${c.count} مدخل`, 90), emoji: '📄' }))
+      : [{ label: 'لا يوجد', value: '0', description: 'القالب فارغ' }]);
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`faq:all${suffix}`).setLabel('عرض الكل').setEmoji('📋').setStyle(ButtonStyle.Primary).setDisabled(!hasEntries),
     new ButtonBuilder().setCustomId(`faq:search${suffix}`).setLabel('بحث').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
@@ -45,9 +58,14 @@ function buildPanel(templateId = 0) {
   return { embeds: [e], components: [new ActionRowBuilder().addComponents(menu), buttons] };
 }
 
+/**
+ * تحديث اللوحات المنشورة.
+ * @param {number|number[]|null} templateId قالب/قوالب محددة، أو null = كل اللوحات.
+ */
 async function refreshPanels(client, templateId = null) {
   let ok = 0;
-  const list = templateId != null ? faq.panels({ templateId: Number(templateId) }) : faq.panels();
+  const ids = templateId == null ? null : [...new Set((Array.isArray(templateId) ? templateId : [templateId]).map(id => Number(id) || 0))];
+  const list = ids ? faq.panels().filter(p => ids.includes(Number(p.template_id) || 0)) : faq.panels();
   for (const p of list) {
     try {
       const ch = await client.channels.fetch(p.channel_id);
@@ -63,7 +81,7 @@ async function refreshPanels(client, templateId = null) {
   return ok;
 }
 
-function entryEmbed(entry, userId) {
+function entryEmbed(entry, userId, { canManage: manage = false } = {}) {
   const cat = faq.category(entry.category_id);
   const e = embed(`${entry.is_important ? '📌 ' : ''}${entry.title}`, entry.content, entry.is_important ? COLORS.warning : COLORS.info)
     .setFooter({ text: `#${entry.id} • ${cat?.name || '—'} • الإصدار ${entry.version}` });
@@ -73,9 +91,9 @@ function entryEmbed(entry, userId) {
     row.addComponents(new ButtonBuilder().setCustomId(`faq:ack:${entry.id}`).setLabel(read ? 'تمت القراءة ✓' : 'تأكيد القراءة')
       .setEmoji('✅').setStyle(read ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(read));
   }
-  // زر سريع لعرض السجل (للإدارة)
-  row.addComponents(new ButtonBuilder().setCustomId(`faq:hist:${entry.id}`).setLabel('السجل').setEmoji('🕘').setStyle(ButtonStyle.Secondary));
-  return { embeds: [e], components: [row] };
+  // زر السجل للإدارة فقط — لا نعرض زراً يرفضه البوت عند الضغط عليه.
+  if (manage) row.addComponents(new ButtonBuilder().setCustomId(`faq:hist:${entry.id}`).setLabel('السجل').setEmoji('🕘').setStyle(ButtonStyle.Secondary));
+  return { embeds: [e], components: row.components.length ? [row] : [] };
 }
 
 function listEmbed(entries, title, { templateId = 0 } = {}) {
@@ -138,18 +156,24 @@ function panelsEmbed(templateId = null, page = 1) {
   const { items, pages, total } = kit.paginate(all, page, 8);
   const e = embed(templateId != null ? `📌 لوحات القالب #${templateId}` : '📌 كل لوحات FAQ', items.map(p => {
     const t = templateOrDefault(p.template_id);
-    const label = p.label ? ` — ${p.label}` : '';
+    // الاسم نص حر من مسؤول — ننظّفه قبل عرضه داخل الإمبد.
+    const label = p.label ? ` — ${truncate(String(p.label).replace(/\s+/g, ' ').trim(), 40)}` : '';
     const sync = p.sync_status === 'error' ? '⚠️ خطأ مزامنة' : '✅';
-    return `${sync} <#${p.channel_id}> • \`${p.message_id.slice(-6)}\` • **${t.name}**${label} • <t:${Math.floor(Date.parse(p.created_at.replace(' ', 'T') + 'Z') / 1000)}:R>`;
+    return `${sync} <#${p.channel_id}> • \`${String(p.message_id).slice(-6)}\` • **${t.name}**${label} • <t:${Math.floor(Date.parse(p.created_at.replace(' ', 'T') + 'Z') / 1000)}:R>`;
   }).join('\n'), COLORS.info)
     .setFooter({ text: `صفحة ${page}/${pages} • ${total} لوحة` });
   return e;
 }
 
+/**
+ * قراءة اختيار التصنيفات: «all»/«الكل» أو القائمة الفارغة = كل التصنيفات.
+ * «كل التصنيفات» يتقدم على أي اختيار آخر مهما كان ترتيبه في القائمة.
+ * @returns {number[]|null} null = اختيار غير صالح.
+ */
 function parseCategories(raw) {
-  const value = String(raw || '').trim();
-  if (!value || /^all|الكل$/i.test(value)) return allCategoryIds();
-  const ids = [...new Set(value.split(/[،,\s]+/).filter(Boolean).map(Number))];
+  const tokens = String(raw || '').split(/[،,\s]+/).map(s => s.trim()).filter(Boolean);
+  if (!tokens.length || tokens.some(tok => /^(all|الكل)$/i.test(tok))) return allCategoryIds();
+  const ids = [...new Set(tokens.map(Number))];
   return ids.length && ids.every(id => faq.category(id)) ? ids : null;
 }
 
@@ -168,7 +192,19 @@ function parseEntryIds(raw) {
 }
 
 /* ===== نماذج قاعدة المعرفة ===== */
+/** كل التصنيفات — لإضافة/تعديل مدخل: يجب أن يبقى اختيار تصنيف فارغ ممكناً. */
 const categoryOptions = FAQ_CATEGORIES.map(c => ({ label: c.name, value: String(c.id), description: c.desc }));
+/**
+ * التصنيفات التي فيها مدخلات فعلاً (+ المختارة حالياً في القالب) — لقائمة القالب فقط،
+ * فلا يُطلب من المسؤول اختيار تصنيف لا يعرض شيئاً.
+ */
+function populatedCategoryOptions(selected = []) {
+  return faq.populatedCategories(selected).map(c => ({
+    label: c.name,
+    value: String(c.id),
+    description: truncate(c.count ? `${c.desc} · ${c.count} مدخل` : `${c.desc} · فارغ حالياً (مختار في هذا القالب)`, 100),
+  }));
+}
 /** خيارات المدخلات لقوائم التثبيت/الإخفاء: الاسم بدل الرقم، مع احتياط نصي إن زادت عن 25. */
 const entryOptions = (entries, picked = []) => entries.slice(0, 25).map(e => ({
   label: `#${e.id} — ${truncate(e.title, 60)}`,
@@ -187,9 +223,13 @@ const modals = {
         description: 'العنوان الذي يظهر للأعضاء أعلى اللوحة.' }),
       forms.field({ id: 'description', label: 'وصف اللوحة', required: false, style: 'paragraph', max: 1000, value: prefill.description,
         description: 'اختياري: سطر يشرح محتوى اللوحة تحت العنوان.' }),
-      forms.select({ id: 'categories', label: 'التصنيفات الظاهرة', options: [{ label: 'كل التصنيفات', value: 'all' }, ...categoryOptions],
+      forms.select({ id: 'categories', label: 'التصنيفات الظاهرة', required: false,
+        options: [
+          { label: 'كل التصنيفات', value: 'all', description: 'أو اترك القائمة فارغة تماماً — النتيجة نفسها.' },
+          ...populatedCategoryOptions(prefill.categoryIds),
+        ],
         multiple: true, max: FAQ_CATEGORIES.length + 1, values: (prefill.categoryIds || []).map(String),
-        description: 'اختيار «كل التصنيفات» يتقدم على أي اختيار آخر.' }),
+        description: 'اختياري — اتركه فارغاً لعرض كل التصنيفات. يُعرض ما فيه مدخلات فقط.' }),
       forms.field({ id: 'color', label: 'لون اللوحة', max: 20,
         value: prefill.color != null ? `#${Number(prefill.color).toString(16).padStart(6, '0')}` : '#5865F2',
         description: 'صيغة Hex مثل #5865F2.', placeholder: '#5865F2' }),
@@ -258,25 +298,29 @@ const modals = {
 };
 
 function readTemplateFields(i) {
-  const categoryIds = parseCategories(i.fields.getTextInputValue('categories'));
-  if (!categoryIds) return { error: '❌ التصنيفات غير صحيحة. استخدم all أو أرقاماً من 1 إلى 11 مفصولة بفواصل.' };
-  const color = parseColor(i.fields.getTextInputValue('color').split(/\s+/)[0] || '');
+  const categoryIds = parseCategories(forms.value(i, 'categories'));
+  if (!categoryIds) return { error: `❌ التصنيفات غير صحيحة. استخدم all أو أرقاماً من ${categoryRange()} مفصولة بفواصل.` };
+  const color = parseColor(forms.value(i, 'color').split(/\s+/)[0] || '');
   if (color == null) return { error: '❌ اللون غير صحيح. استخدم صيغة Hex مثل #5865F2 في بداية الحقل.' };
   return {
-    name: i.fields.getTextInputValue('name').trim(),
-    title: i.fields.getTextInputValue('title').trim(),
-    description: (i.fields.getTextInputValue('description') || '').trim(),
+    name: forms.value(i, 'name'),
+    title: forms.value(i, 'title'),
+    description: forms.value(i, 'description'),
     categoryIds, color,
   };
 }
 
-async function notifyUpdate(client, action, entry, userId) {
+/** خطأ اسم مكرر في SQLite → رسالة مفهومة بدل نص الخطأ الخام. */
+const isDuplicateTemplateName = (e) => /UNIQUE constraint failed: faq_templates\.name/i.test(e?.message || '');
+
+async function notifyUpdate(client, action, entry, userId, { previousCategoryId = null } = {}) {
   const cat = faq.category(entry.category_id);
   const labels = { create: '🆕 مدخل جديد', edit: '✏️ تعديل مدخل', delete: '🗑️ حذف مدخل' };
   const e = embed(`${labels[action]} في قاعدة المعرفة`, `**${entry.title}**\n📂 ${cat?.name}\n👤 بواسطة <@${userId}>\n🆔 \`#${entry.id}\` • الإصدار ${entry.version}`,
     action === 'delete' ? COLORS.danger : COLORS.success);
   await sendToChannel(client, 'staff-updates', { embeds: [e] });
-  await refreshPanels(client);
+  // نُحدّث لوحات القوالب التي تعرض هذا المدخل فقط — لا كل لوحات السيرفر في كل تعديل.
+  await refreshPanels(client, faq.templatesShowing(entry, previousCategoryId));
 }
 
 module.exports = {
@@ -289,8 +333,11 @@ module.exports = {
       async execute(i) {
         const cid = i.options.getInteger('category');
         if (!cid) return i.reply({ ...buildPanel(0), ephemeral: true });
-        const entries = faq.list(cid);
-        return i.reply({ embeds: [listEmbed(entries, `📂 ${faq.category(cid).name}`)], components: entrySelectRow(entries, 0), ephemeral: true });
+        // قد يصل رقم غير موجود (لوحة قديمة أو طلب مُعدّل) — نتحقق بدل الانهيار.
+        const cat = faq.category(cid);
+        if (!cat) return replyEphemeral(i, `❌ التصنيف غير موجود. المتاح: ${FAQ_CATEGORIES.map(c => `**${c.id}** ${c.name}`).join('، ')}.`, COLORS.danger);
+        const entries = faq.list(cat.id);
+        return i.reply({ embeds: [listEmbed(entries, `📂 ${cat.name}`)], components: entrySelectRow(entries, 0), ephemeral: true });
       },
     },
     {
@@ -333,9 +380,11 @@ module.exports = {
       data: new SlashCommandBuilder().setName('faq-panel').setDescription('نشر اللوحة الافتراضية في هذه القناة'),
       level: LEVELS.MANAGEMENT,
       async execute(i) {
-        const msg = await i.channel.send(buildPanel(0));
-        faq.addPanel(msg.id, i.channelId, i.user.id, 0);
-        return replyEphemeral(i, '✅ تم نشر اللوحة الافتراضية. استخدم قوالب FAQ إذا أردت لوحات مستقلة — كل قالب يُنشر في رومه ويُعدّل وحده.', COLORS.success);
+        try {
+          const msg = await i.channel.send(buildPanel(0));
+          faq.addPanel(msg.id, i.channelId, i.user.id, 0);
+          return replyEphemeral(i, '✅ تم نشر اللوحة الافتراضية. استخدم قوالب FAQ إذا أردت لوحات مستقلة — كل قالب يُنشر في رومه ويُعدّل وحده.', COLORS.success);
+        } catch (e) { return replyEphemeral(i, `❌ لم أستطع النشر في هذه القناة: ${e.message}`, COLORS.danger); }
       },
     },
     {
@@ -422,7 +471,7 @@ module.exports = {
         if (!t || t.id === 0) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
         const e = embed(`⚙️ إعداد القالب #${t.id} — ${t.name}`, [
           `**العنوان:** ${t.title}`,
-          `**التصنيفات:** ${t.categoryIds.join(', ')}`,
+          `**التصنيفات:** ${faq.templateCategories(t.id).map(c => c.name).join('، ') || '_كل التصنيفات_'}`,
           `**📌 مثبت:** ${t.pinnedIds.length ? t.pinnedIds.map(id => `\`#${id}\``).join(', ') : '_لا يوجد_'}`,
           `**🙈 مخفي:** ${t.excludedIds.length ? t.excludedIds.map(id => `\`#${id}\``).join(', ') : '_لا يوجد_'}`,
           `**ℹ️ ملاحظة اللوحة:** ${t.note || '_لا يوجد_'}`,
@@ -459,14 +508,20 @@ module.exports = {
   components: {
     'faq:cat': async (i, [templateId]) => {
       const t = templateOrDefault(templateId);
-      const cid = Number(i.values[0]);
-      const entries = faq.listForTemplate(t.id, cid);
-      return i.reply({ embeds: [listEmbed(entries, `📂 ${faq.category(cid).name} • ${t.name}`, { templateId: t.id })], components: entrySelectRow(entries, t.id), ephemeral: true });
+      const cid = Number(i.values?.[0]);
+      // لوحة قديمة قد تحمل تصنيفاً حُذف أو الخيار الفارغ «0» — نتحقق بدل الانهيار.
+      const cat = faq.category(cid);
+      if (!cat) return replyEphemeral(i, '❌ هذا التصنيف لم يعد متاحاً في هذه اللوحة. اطلب من الإدارة `/faq-refresh` لتحديثها.', COLORS.danger);
+      const entries = faq.listForTemplate(t.id, cat.id);
+      return i.reply({ embeds: [listEmbed(entries, `📂 ${cat.name} • ${t.name}`, { templateId: t.id })], components: entrySelectRow(entries, t.id), ephemeral: true });
     },
-    'faq:view': async (i) => {
-      const entry = faq.get(Number(i.values[0]));
+    'faq:view': async (i, [templateId]) => {
+      const t = templateOrDefault(templateId);
+      const entry = faq.get(Number(i.values?.[0]));
       if (!entry) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
-      return i.reply({ ...entryEmbed(entry, i.user.id), ephemeral: true });
+      // نحترم نطاق اللوحة: مدخل مخفي أو خارج تصنيفات القالب لا يُفتح من لوحتها.
+      if (!faq.isVisibleIn(t.id, entry)) return replyEphemeral(i, '❌ هذا المدخل غير متاح في هذه اللوحة.', COLORS.danger);
+      return i.reply({ ...entryEmbed(entry, i.user.id, { canManage: canManage(i) }), ephemeral: true });
     },
     'faq:all': async (i, [templateId]) => {
       const t = templateOrDefault(templateId);
@@ -482,7 +537,8 @@ module.exports = {
     'faq:search': async (i, [templateId]) => forms.open(i, modals.search({ templateId })),
     'faq:searchmodal': async (i, [templateId]) => {
       const t = templateOrDefault(templateId);
-      const q = i.fields.getTextInputValue('q');
+      const q = forms.value(i, 'q');
+      if (q.trim().length < 2) return replyEphemeral(i, '❌ كلمة البحث قصيرة جداً — اكتب حرفين على الأقل.', COLORS.danger);
       const entries = faq.search(q, { templateId: t.id });
       return i.reply({ embeds: [listEmbed(entries, `🔍 ${t.name} — نتائج البحث عن: ${q}`, { templateId: t.id })], components: entrySelectRow(entries, t.id), ephemeral: true });
     },
@@ -491,7 +547,7 @@ module.exports = {
       if (!entry) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
       faq.acknowledge(entry.id, i.user.id, entry.version);
       // زر غير مفعّل بعد التأكيد
-      const updated = entryEmbed(entry, i.user.id);
+      const updated = entryEmbed(entry, i.user.id, { canManage: canManage(i) });
       try { return await i.update(updated); } catch { return i.reply({ ...updated, ephemeral: true }); }
     },
     'faq:hist': async (i, [id]) => {
@@ -503,21 +559,32 @@ module.exports = {
       return i.reply({ embeds: [e], ephemeral: true });
     },
     'faq:addmodal': async (i) => {
-      const categoryId = Number(i.fields.getTextInputValue('category'));
-      if (!faq.category(categoryId)) return replyEphemeral(i, '❌ رقم التصنيف غير صحيح (1-11).', COLORS.danger);
-      const important = /^(نعم|y|yes|1)$/i.test(i.fields.getTextInputValue('important').trim());
-      const entry = faq.add({ categoryId, title: i.fields.getTextInputValue('title'), content: i.fields.getTextInputValue('content'), important, userId: i.user.id });
-      await replyEphemeral(i, `✅ تمت إضافة المدخل **#${entry.id}** — ${faq.category(categoryId).name}${important ? ' (📌 يتطلب تأكيد قراءة)' : ''}.`, COLORS.success);
-      return notifyUpdate(i.client, 'create', entry, i.user.id);
+      const categoryId = Number(forms.value(i, 'category'));
+      const cat = faq.category(categoryId);
+      if (!cat) return replyEphemeral(i, `❌ التصنيف غير صحيح — اختر رقماً من ${categoryRange()}.`, COLORS.danger);
+      const important = /^(نعم|y|yes|1)$/i.test(forms.value(i, 'important'));
+      try {
+        const entry = faq.add({ categoryId: cat.id, title: forms.value(i, 'title'), content: forms.value(i, 'content'), important, userId: i.user.id });
+        audit.record({ action: 'faq_entry_created', actorId: i.user.id, targetId: String(entry.id), details: { title: entry.title, categoryId: entry.category_id, important }, channelId: i.channelId });
+        await replyEphemeral(i, `✅ تمت إضافة المدخل **#${entry.id}** — ${cat.name}${important ? ' (📌 يتطلب تأكيد قراءة)' : ''}.`, COLORS.success);
+        return notifyUpdate(i.client, 'create', entry, i.user.id);
+      } catch (e) { return replyEphemeral(i, `❌ تعذّرت الإضافة: ${e.message}`, COLORS.danger); }
     },
     'faq:editmodal': async (i, [id]) => {
-      const categoryId = Number(i.fields.getTextInputValue('category'));
-      if (!faq.category(categoryId)) return replyEphemeral(i, '❌ رقم التصنيف غير صحيح (1-11).', COLORS.danger);
-      const important = /^(نعم|y|yes|1)$/i.test(i.fields.getTextInputValue('important').trim());
-      const entry = faq.edit(Number(id), { categoryId, title: i.fields.getTextInputValue('title'), content: i.fields.getTextInputValue('content'), important, userId: i.user.id });
-      if (!entry) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
-      await replyEphemeral(i, `✅ تم تعديل المدخل **#${entry.id}** (الإصدار ${entry.version}).`, COLORS.success);
-      return notifyUpdate(i.client, 'edit', entry, i.user.id);
+      const categoryId = Number(forms.value(i, 'category'));
+      const cat = faq.category(categoryId);
+      if (!cat) return replyEphemeral(i, `❌ التصنيف غير صحيح — اختر رقماً من ${categoryRange()}.`, COLORS.danger);
+      const important = /^(نعم|y|yes|1)$/i.test(forms.value(i, 'important'));
+      const before = faq.get(Number(id));
+      if (!before) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
+      try {
+        const entry = faq.edit(before.id, { categoryId: cat.id, title: forms.value(i, 'title'), content: forms.value(i, 'content'), important, userId: i.user.id });
+        if (!entry) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
+        audit.record({ action: 'faq_entry_edited', actorId: i.user.id, targetId: String(entry.id), details: { title: entry.title, categoryId: entry.category_id, fromCategoryId: before.category_id, version: entry.version }, channelId: i.channelId });
+        await replyEphemeral(i, `✅ تم تعديل المدخل **#${entry.id}** (الإصدار ${entry.version}).`, COLORS.success);
+        // لو تغيّر التصنيف: لوحات القالب القديم تحتاج تحديثاً أيضاً.
+        return notifyUpdate(i.client, 'edit', entry, i.user.id, { previousCategoryId: before.category_id });
+      } catch (e) { return replyEphemeral(i, `❌ تعذّر التعديل: ${e.message}`, COLORS.danger); }
     },
     'faq:template-addmodal': async (i) => {
       const fields = readTemplateFields(i);
@@ -526,7 +593,11 @@ module.exports = {
         const t = faq.addTemplate({ ...fields, userId: i.user.id });
         audit.record({ action: 'faq_template_created', actorId: i.user.id, targetId: String(t.id), details: { name: t.name, categoryIds: t.categoryIds }, channelId: i.channelId });
         return replyEphemeral(i, `✅ تم إنشاء القالب **#${t.id} — ${t.name}**.\nاستخدم \`/faq-template-send id:${t.id} channel:#الروم\` لنشره — كل قالب يُنشر في رومه ويُعدّل وحده.`, COLORS.success);
-      } catch (e) { return replyEphemeral(i, `❌ تعذر إنشاء القالب: ${e.message}`, COLORS.danger); }
+      } catch (e) {
+        return replyEphemeral(i, isDuplicateTemplateName(e)
+          ? '❌ يوجد قالب آخر بالاسم نفسه — اختر اسماً مختلفاً.'
+          : `❌ تعذر إنشاء القالب: ${e.message}`, COLORS.danger);
+      }
     },
     'faq:template-editmodal': async (i, [id]) => {
       const fields = readTemplateFields(i);
@@ -537,7 +608,11 @@ module.exports = {
         audit.record({ action: 'faq_template_edited', actorId: i.user.id, targetId: String(t.id), details: { version: t.version, name: t.name, categoryIds: t.categoryIds }, channelId: i.channelId });
         await replyEphemeral(i, `✅ تم تعديل القالب **#${t.id}** إلى الإصدار ${t.version}. سيتم تحديث لوحاته المنشورة فقط.`, COLORS.success);
         return refreshPanels(i.client, t.id);
-      } catch (e) { return replyEphemeral(i, `❌ تعذر تعديل القالب: ${e.message}`, COLORS.danger); }
+      } catch (e) {
+        return replyEphemeral(i, isDuplicateTemplateName(e)
+          ? '❌ يوجد قالب آخر بالاسم نفسه — اختر اسماً مختلفاً.'
+          : `❌ تعذر تعديل القالب: ${e.message}`, COLORS.danger);
+      }
     },
     'faq:templatedelconfirm': async (i, [id]) => {
       const t = faq.removeTemplate(Number(id), i.user.id);
@@ -549,6 +624,7 @@ module.exports = {
     'faq:delconfirm': async (i, [id]) => {
       const entry = faq.remove(Number(id), i.user.id);
       if (!entry) return replyEphemeral(i, '❌ المدخل غير موجود.', COLORS.danger);
+      audit.record({ action: 'faq_entry_deleted', actorId: i.user.id, targetId: String(entry.id), details: { title: entry.title, categoryId: entry.category_id, version: entry.version }, channelId: i.channelId });
       await i.update({ embeds: [embed('🗑️ تم الحذف', `تم حذف **${entry.title}** (#${entry.id}).`, COLORS.danger)], components: [] });
       return notifyUpdate(i.client, 'delete', entry, i.user.id);
     },
@@ -557,46 +633,59 @@ module.exports = {
     // ===== متقدّم: تثبيت/إخفاء/ملاحظة =====
     'faq:cfgpin': async (i, [id]) => {
       const t = faq.template(Number(id));
-      const entries = faq.listForTemplate(Number(id));
+      if (!t || t.id === 0) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
+      const entries = faq.listForTemplate(t.id);
       if (!entries.length) return replyEphemeral(i, 'ℹ️ لا توجد مدخلات في هذا القالب بعد — أضف مدخلاً ثم ثبّته.', COLORS.gray);
-      return forms.open(i, modals.pin({ id, entries, current: t?.pinnedIds || [] }));
+      return forms.open(i, modals.pin({ id: t.id, entries, current: t.pinnedIds }));
     },
     'faq:cfgpinmodal': async (i, [id]) => {
-      const ids = parseEntryIds(i.fields.getTextInputValue('ids'));
+      const ids = parseEntryIds(forms.value(i, 'ids'));
       const invalid = ids.filter(eid => !faq.get(eid));
       if (invalid.length) return replyEphemeral(i, `❌ هذه المدخلات غير موجودة: ${invalid.join(', ')}`, COLORS.danger);
-      const t = faq.editTemplate(Number(id), { pinnedIds: ids, userId: i.user.id });
-      if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
-      await replyEphemeral(i, `✅ تم تثبيت **${ids.length}** مدخل في القالب **#${t.id}**.`, COLORS.success);
-      return refreshPanels(i.client, t.id);
+      try {
+        const t = faq.editTemplate(Number(id), { pinnedIds: ids, userId: i.user.id });
+        if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
+        // ما كان خارج تصنيفات القالب تسقطه الخدمة — نُبلغ بالعدد الفعلي لا المطلوب.
+        const skipped = ids.length - t.pinnedIds.length;
+        await replyEphemeral(i, `✅ تم تثبيت **${t.pinnedIds.length}** مدخل في القالب **#${t.id}**.${skipped > 0 ? `\n⚠️ ${skipped} مدخل خارج تصنيفات هذا القالب فلم يُثبَّت.` : ''}`, COLORS.success);
+        return refreshPanels(i.client, t.id);
+      } catch (e) { return replyEphemeral(i, `❌ تعذّر الحفظ: ${e.message}`, COLORS.danger); }
     },
     'faq:cfghide': async (i, [id]) => {
       const t = faq.template(Number(id));
-      const entries = faq.listForTemplate(Number(id));
+      if (!t || t.id === 0) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
+      const entries = faq.listForTemplate(t.id);
       if (!entries.length) return replyEphemeral(i, 'ℹ️ لا يوجد ما يمكن إخفاؤه في هذا القالب حالياً.', COLORS.gray);
-      return forms.open(i, modals.hide({ id, entries, current: t?.excludedIds || [] }));
+      return forms.open(i, modals.hide({ id: t.id, entries, current: t.excludedIds }));
     },
     'faq:cfghidemodal': async (i, [id]) => {
-      const ids = parseEntryIds(i.fields.getTextInputValue('ids'));
+      const ids = parseEntryIds(forms.value(i, 'ids'));
       const invalid = ids.filter(eid => !faq.get(eid));
       if (invalid.length) return replyEphemeral(i, `❌ هذه المدخلات غير موجودة: ${invalid.join(', ')}`, COLORS.danger);
-      const t = faq.editTemplate(Number(id), { excludedIds: ids, userId: i.user.id });
-      if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
-      await replyEphemeral(i, `✅ تم إخفاء **${ids.length}** مدخل في هذا القالب فقط.`, COLORS.success);
-      return refreshPanels(i.client, t.id);
+      try {
+        const t = faq.editTemplate(Number(id), { excludedIds: ids, userId: i.user.id });
+        if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
+        await replyEphemeral(i, `✅ تم إخفاء **${t.excludedIds.length}** مدخل في هذا القالب فقط.`, COLORS.success);
+        return refreshPanels(i.client, t.id);
+      } catch (e) { return replyEphemeral(i, `❌ تعذّر الحفظ: ${e.message}`, COLORS.danger); }
     },
     'faq:cfgnote': async (i, [id]) => {
-      return forms.open(i, modals.note({ id, current: faq.template(Number(id))?.note || '' }));
+      const t = faq.template(Number(id));
+      if (!t || t.id === 0) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
+      return forms.open(i, modals.note({ id: t.id, current: t.note }));
     },
     'faq:cfgenotemodal': async (i, [id]) => {
-      const note = (i.fields.getTextInputValue('note') || '').trim();
-      const t = faq.editTemplate(Number(id), { note, userId: i.user.id });
-      if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
-      await replyEphemeral(i, note ? '✅ تم حفظ ملاحظة اللوحة.' : '✅ تم مسح ملاحظة اللوحة.', COLORS.success);
-      return refreshPanels(i.client, t.id);
+      const note = forms.value(i, 'note');
+      try {
+        const t = faq.editTemplate(Number(id), { note, userId: i.user.id });
+        if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
+        await replyEphemeral(i, note ? '✅ تم حفظ ملاحظة اللوحة.' : '✅ تم مسح ملاحظة اللوحة.', COLORS.success);
+        return refreshPanels(i.client, t.id);
+      } catch (e) { return replyEphemeral(i, `❌ تعذّر الحفظ: ${e.message}`, COLORS.danger); }
     },
     'faq:cfgclear': async (i, [id]) => {
-      const t = faq.editTemplate(Number(id), { pinnedIds: [], excludedIds: [], userId: i.user.id });
+      let t = null;
+      try { t = faq.editTemplate(Number(id), { pinnedIds: [], excludedIds: [], userId: i.user.id }); } catch (e) { return replyEphemeral(i, `❌ تعذّر المسح: ${e.message}`, COLORS.danger); }
       if (!t) return replyEphemeral(i, '❌ القالب غير موجود.', COLORS.danger);
       await i.update({ embeds: [embed('🧹 تم المسح', `تم مسح التثبيت والإخفاء للقالب **#${t.id}**.`, COLORS.success)], components: [] });
       return refreshPanels(i.client, t.id);
@@ -623,5 +712,5 @@ module.exports = {
     },
   },
 
-  refreshPanels, buildPanel, templateListEmbed, panelsEmbed,
+  refreshPanels, buildPanel, templateListEmbed, panelsEmbed, parseCategories, entryEmbed,
 };
