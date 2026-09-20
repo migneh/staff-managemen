@@ -8,7 +8,7 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ComponentType,
 } = require('discord.js');
 
-const { arDigits: AR_DIGITS } = require('../utils');
+const { arDigits: AR_DIGITS, COLORS, embed, truncate } = require('../utils');
 
 /** `<t:1700000000:D>` — تاريخ محلي في جهاز القارئ */
 function tsDate(value, style = 'D') {
@@ -163,6 +163,64 @@ function groupedSelect({ customId, placeholder, options, minValues = 1, maxValue
   return rows;
 }
 
+// ===== البطاقات الموحّدة: شكل واحد لكل رسائل البوت =====
+const BRAND = 'نظام إدارة الفريق';
+const LIMITS = { title: 256, description: 4096, fields: 25, name: 256, value: 1024, footer: 2048 };
+
+/** قصّ آمن على حدود ديسكورد (نفس قاعدة utils.embed للحقول) */
+const clip = (text, max) => truncate(String(text ?? ''), max);
+
+/** وقت نسبي جاهز للتذييل: «آخر تحديث: منذ 3 دقائق» */
+function stamp(value = null) {
+  const epoch = value ? toEpoch(value) : Math.floor(Date.now() / 1000);
+  return epoch ? `<t:${epoch}:R>` : 'الآن';
+}
+
+/** سطر تذييل موحّد: نص اختياري + هوية البوت + وقت نسبي */
+function footerLine(text = null, { brand = true, time = true, value = null } = {}) {
+  return [text, brand ? BRAND : null, time ? stamp(value) : null].filter(Boolean).join(' • ');
+}
+
+/**
+ * بطاقة موحّدة لكل رسائل البوت (نجاح/تحذير/خطأ/معلومة).
+ * - تقصّ العنوان والوصف على حدود ديسكورد بدل أن يفشل الرد بالكامل.
+ * - تُسقط الحقول الفارغة وترتّب الأزواج inline في شبكة ثلاثية (kit.pairs).
+ * - تُضيف تذييلاً موحّداً يحمل هوية البوت ووقتاً نسبياً إن لم يُمرَّر تذييل.
+ */
+function card({
+  title, description = null, fields = [], color = COLORS.primary,
+  footer = undefined, author = null, thumbnail = null, image = null, time = true,
+} = {}) {
+  const e = embed(title, description, color);
+  const clean = (Array.isArray(fields) ? fields : [fields])
+    .filter(f => f && f.name && f.value != null && String(f.value).trim() !== '')
+    .slice(0, LIMITS.fields)
+    .map(f => ({ name: clip(f.name, LIMITS.name), value: clip(f.value, LIMITS.value), inline: f.inline !== false }));
+  if (clean.length) e.addFields(...pairs(clean));
+  if (author) e.setAuthor(author);
+  if (thumbnail) e.setThumbnail(thumbnail);
+  if (image) e.setImage(image);
+  e.setFooter({ text: clip(footer === undefined ? footerLine(null, { time }) : footer, LIMITS.footer) });
+  return e;
+}
+
+const NOTE = {
+  success: { emoji: '✅', color: COLORS.success },
+  error: { emoji: '❌', color: COLORS.danger },
+  warning: { emoji: '⚠️', color: COLORS.warning },
+  info: { emoji: 'ℹ️', color: COLORS.info },
+  neutral: { emoji: '▫️', color: COLORS.gray },
+};
+
+/** بطاقة حالة جاهزة: notice('success', 'تم الحفظ', '…') */
+function notice(kind, title, description = null, { color = null, fields = [], footer, emoji = null } = {}) {
+  const note = NOTE[kind] || NOTE.info;
+  return card({
+    title: `${emoji || note.emoji} ${title}`, description, fields,
+    color: color || note.color, footer,
+  });
+}
+
 const emptyEmbed = (title, hint, color = 0x99aab5) => ({ title, hint, color });
 
 /** تقسيم النص إلى كتل لا تتجاوز حداً معيّناً */
@@ -210,4 +268,5 @@ module.exports = {
   tsDate, tsRelative, dateLine, toEpoch, daysFromToday, relativeDays, startOfDay, plural, daysWord, itemsWord,
   CHIP, chip, checkLine, progressBar, coverageBar,
   paginate, navRow, cid, button, selectMenu, groupedSelect, emptyEmbed, chunkLines, trim, bullet, pairs, confirmRow,
+  BRAND, LIMITS, clip, stamp, footerLine, card, notice,
 };

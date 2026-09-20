@@ -275,9 +275,9 @@ describe('الإعدادات (/setup)', () => {
     assert.equal(st.rolesDone, 1);
     assert.equal(st.channelsDone, 1);
     assert.equal(st.missingChannels.length, 9);
-    // الصفحات تُبنى بدون أخطاء (3 صفوف بعد إضافة سياسات الإجازة/الاستقالة)
+    // الرئيسية المختصرة: خطوة تالية وقائمة أقسام بدل صفوف الأزرار
     const home = setup.homePage();
-    assert.equal(home.components.length, 3);
+    assert.equal(home.components.length, 2);
   });
 });
 

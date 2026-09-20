@@ -3,6 +3,8 @@ const { LEVELS } = require('../constants');
 
 const modules = [
   require('./setup'),
+  require('./forms'),
+  require('./wizard'),
   require('./help'),
   require('./faq'),
   require('./logging'),
@@ -13,6 +15,8 @@ const modules = [
   require('./recognition'),
   require('./promotions'),
   require('./reports'),
+  require('./points'),
+  require('./ratings'),
   require('./tasks'),
   require('./audit'),
   require('./backup'),
@@ -34,14 +38,28 @@ const modules = [
  * guarded        : true يعني أن المعالج يفحص الصلاحية داخلياً ويجب تركه (توثيق)
  */
 const COMPONENT_ACCESS = {
+  'wizard:submit': { level: LEVELS.STAFF, guarded: true },
+  'wizard:reopen': { level: LEVELS.STAFF, guarded: true },
+  'wizard:edit': { level: LEVELS.STAFF, guarded: true },
+  'wizard:cancel': { level: LEVELS.STAFF, guarded: true },
+  'wizard:run': { level: LEVELS.STAFF, guarded: true },
+  'form:retry': { level: 0, guarded: true },
   // ===== الإعداد: Administrator فقط (مفروض في index.js) =====
+  'setup:rating-channel': { adminOnly: true },
+  'setup:rating-bot': { adminOnly: true },
+  'ratings:period': { level: LEVELS.STAFF, guarded: true },
   'setup:home': { adminOnly: true },
+  'setup:section': { adminOnly: true },
   'setup:roles': { adminOnly: true },
   'setup:channels': { adminOnly: true },
   'setup:activity': { adminOnly: true },
   'setup:ticket-source': { adminOnly: true },
   'setup:governance': { adminOnly: true },
   'setup:policies': { adminOnly: true },
+  'setup:policies-advanced': { adminOnly: true },
+  'setup:staff': { adminOnly: true },
+  'setup:staff-sync': { adminOnly: true },
+  'setup:policies-advanced-modal': { adminOnly: true },
   'setup:vacation-timing': { adminOnly: true },
   'setup:pickrole': { adminOnly: true },
   'setup:pickchannel': { adminOnly: true },
@@ -87,6 +105,11 @@ const COMPONENT_ACCESS = {
   // ===== تسجيل العمل =====
   'ticket:log': { level: LEVELS.STAFF, team: 'support' },
   'modaction:log': { level: LEVELS.STAFF, team: 'moderation' },
+  'modaction:picktype': { level: LEVELS.STAFF, team: 'moderation' },
+  'modaction:duration': { level: LEVELS.STAFF, team: 'moderation' },
+  'modaction:confirm': { level: LEVELS.STAFF, team: 'moderation', guarded: true },
+  'modaction:cancel': { level: LEVELS.STAFF, team: 'moderation', guarded: true },
+  'modaction:edit': { level: LEVELS.STAFF, team: 'moderation', guarded: true },
 
   // ===== الإجازات =====
   'leave:modal': { level: LEVELS.STAFF, owner: 'self' },
@@ -96,6 +119,26 @@ const COMPONENT_ACCESS = {
   'leave:extendmodal': { level: LEVELS.STAFF, owner: 'self' },
   'leave:cancelpick': { level: LEVELS.STAFF },
   'leave:pending': { level: LEVELS.MANAGEMENT },   // كان بلا فحص
+  'leave:draft-submit': { level: LEVELS.STAFF, guarded: true },
+  'leave:draft-edit': { level: LEVELS.STAFF, guarded: true },
+  'leave:draft-cancel': { level: LEVELS.STAFF, guarded: true },
+  'leave:newrequest': { level: LEVELS.STAFF, guarded: true },
+  'leave:picktype': { level: LEVELS.STAFF, guarded: true },
+  'leave:qstart': { level: LEVELS.STAFF, owner: 'self', guarded: true },
+  'leave:qdays': { level: LEVELS.STAFF, owner: 'self', guarded: true },
+  'leave:qreason': { level: LEVELS.STAFF, owner: 'self', guarded: true },
+  'leave:qgo': { level: LEVELS.STAFF, owner: 'self', guarded: true },
+  'leave:mine': { level: LEVELS.STAFF, guarded: true },
+  'leave:balance': { level: LEVELS.STAFF, guarded: true },
+  'leave:cal': { level: LEVELS.STAFF, guarded: true },
+  'leave:acceptsuggest': { level: LEVELS.STAFF, guarded: true },
+  'leave:declinesuggest': { level: LEVELS.STAFF, guarded: true },
+  'leave:suggest': { level: LEVELS.MANAGEMENT, guarded: true },
+  'leave:suggestmodal': { level: LEVELS.MANAGEMENT, guarded: true },
+  'leave:dashstatus': { level: LEVELS.MANAGEMENT, guarded: true },
+  'leave:dashtype': { level: LEVELS.MANAGEMENT, guarded: true },
+  'leave:dashpage': { level: LEVELS.MANAGEMENT, guarded: true },
+  'leave:reviewopen': { level: LEVELS.MANAGEMENT, guarded: true },
   'leave:details': { level: LEVELS.MANAGEMENT },   // كان بلا فحص — يكشف تفاصيل طلبات الآخرين
   'leave:approve': { level: LEVELS.MANAGEMENT, guarded: true },
   'leave:reject': { level: LEVELS.MANAGEMENT, guarded: true },
@@ -130,16 +173,27 @@ const COMPONENT_ACCESS = {
   'recognition:approve': { level: LEVELS.MANAGEMENT, guarded: true },
   'recognition:reject': { level: LEVELS.MANAGEMENT, guarded: true },
   'score:weightsmodal': { level: LEVELS.MANAGEMENT, guarded: true },
+  'task:page': { level: LEVELS.STAFF, owner: 'self' },
   'task:complete': { level: LEVELS.STAFF, owner: 'self' },
 
   // ===== الردود الشخصية من /me و /help =====
   'me:perf': { level: LEVELS.STAFF, owner: 'self' },
   'me:record': { level: LEVELS.STAFF, owner: 'self' },
   'me:promo': { level: LEVELS.STAFF, owner: 'self' },
+  'points:grantok': { level: LEVELS.MANAGEMENT, guarded: true },     // المنح اليدوي يتحقق من صاحب المنحة داخلياً
+  'points:grantcancel': { level: LEVELS.MANAGEMENT, guarded: true },
   'points:contest': { level: LEVELS.STAFF, owner: 'self' },
   'points:contestmodal': { level: LEVELS.STAFF, owner: 'self' },
   'help:open': { level: LEVELS.STAFF },
   'help:section': { level: LEVELS.STAFF },
+  'help:page': { level: LEVELS.STAFF },
+  'help:search': { level: LEVELS.STAFF },
+  'help:searchmodal': { level: LEVELS.STAFF },
+  'me:home': { level: LEVELS.STAFF, owner: 'self' },
+  'nav:configure': { level: LEVELS.STAFF, guarded: true },
+  'nav:action': { level: LEVELS.STAFF, guarded: true },
+  'nav:run': { level: LEVELS.STAFF, guarded: true },
+  'nav:choice': { level: LEVELS.STAFF, guarded: true },
 };
 
 const commands = new Map();

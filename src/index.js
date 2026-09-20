@@ -6,18 +6,24 @@ console.log('[startup] Loading configuration...');
 const config = require('./config');
 console.log('[startup] Loading database module and application services...');
 const { getDb } = require('./database');
-const { commands, resolveComponent, validateRegistry } = require('./commands');
-const { resolveStaff, LEVEL_LABELS, isServerManager } = require('./services/permissions');
+const { commands, validateRegistry } = require('./commands');
+const { resolveStaff, isServerManager } = require('./services/permissions');
 const logger = require('./logger');
 const staffService = require('./services/staff');
+const { accessContext, commandAccessError } = require('./services/commandAccess');
 const activity = require('./services/activity');
 const ticketLogs = require('./services/ticketLogs');
+const supportRatings = require('./services/supportRatings');
+const forms = require('./ui/forms');
+const { dispatch: dispatchComponent } = require('./services/componentDispatch');
 const audit = require('./services/audit');
 const scheduler = require('./scheduler');
 const health = require('./health');
 const settings = require('./services/settings');
 const { deployCommands } = require('./deploy-commands');
 const { embed: buildEmbed, replyEphemeral, COLORS, log: logToChannel, embed, sendToChannel } = require('./utils');
+const staffSync = require('./services/staffSync');
+const { reportEmbed } = staffSync;
 const { TEAMS, LEVELS } = require('./constants');
 
 console.log('[startup] Application modules loaded; checking required configuration...');
@@ -66,6 +72,21 @@ client.once(Events.ClientReady, async (c) => {
     } catch (e) { console.error('❌ فشل تسجيل الأوامر:', e.message); }
   }
 
+  // تسجيل كل الإداريين من رتب الديسكورد دفعة واحدة — دون انتظار رسالة من كل عضو.
+  try {
+    const guild = await c.guilds.fetch(config.guildId);
+    const report = await staffSync.syncGuild(guild, { actorId: c.user.id });
+    if (report.error) console.error(`⚠️  تعذّرت مزامنة الإداريين: ${report.error}`);
+    else {
+      console.log(`👥 مزامنة الإداريين: ${report.registered.length} جديد • ${report.updated.length} محدّث • ${report.departures.length} نُزعت رتبه (من ${report.scanned} عضواً)`);
+      if (report.registered.length) {
+        await logToChannel(c, '🆕 دفعة إداريين جدد', reportEmbed(report, { title: '🆕 تسجيل دفعة الإداريين عند التشغيل' }).setDescription(
+          `سُجّل **${report.registered.length}** إدارياً من رتبهم مباشرة:`.concat('\n').concat(report.registered.slice(0, 20).map(r => `<@${r.id}> — **${r.rank}**`).join('\n')),
+        ), COLORS.success);
+      }
+    }
+  } catch (e) { console.error('⚠️  فشل تسجيل الإداريين عند التشغيل:', e.message); }
+
   const st = settings.status();
   if (!st.complete) console.log(`⚙️  الإعداد غير مكتمل (رتب ${st.rolesDone}/${st.rolesTotal} • قنوات ${st.channelsDone}/${st.channelsTotal}) — استخدم /setup داخل السيرفر.`);
   if (!st.ticketSourceConfigured) console.log('🎫 التسجيل التلقائي للتكتات غير مفعل — حدد قناة سجل البوت الخارجي من /setup.');
@@ -109,6 +130,7 @@ client.on(Events.MessageCreate, async (msg) => {
   try {
     if (!msg.guild || msg.guild.id !== config.guildId) return;
     if (msg.author.bot) {
+      await supportRatings.importMessage(msg, client.user?.id);
       await importExternalTicketLog(msg);
       return;
     }
@@ -154,7 +176,8 @@ client.on(Events.InteractionCreate, async (i) => {
 
     const isAdmin = i.member.permissions.has(PermissionFlagsBits.Administrator);
     const serverManager = isServerManager(i.member);
-    const isSetup = (i.isChatInputCommand() && i.commandName === 'setup') || (i.customId && i.customId.startsWith('setup:'));
+    const originalId = forms.lookup(i)?.originalId || i.customId;
+    const isSetup = (i.isChatInputCommand() && i.commandName === 'setup') || originalId?.startsWith('setup:');
     let info = null;
 
     if (isSetup) {
@@ -180,40 +203,13 @@ client.on(Events.InteractionCreate, async (i) => {
       const cmd = commands.get(i.commandName);
       if (!cmd) return;
       if (isSetup) return await cmd.execute(i);
-      if (cmd.serverManagerOnly && !serverManager) return replyEphemeral(i, '❌ هذا الأمر متاح لـ **Server Manager** أو **General Manager** الحالي فقط.', COLORS.danger);
-      const effectiveLevel = i.staffLevel || (serverManager ? 7 : 0);
-      if (effectiveLevel < (cmd.level || 0)) return replyEphemeral(i, `❌ هذا الأمر متاح لـ **${LEVEL_LABELS[cmd.level] || 'إدارة أعلى'}**.`, COLORS.danger);
-      if (cmd.maxLevel && effectiveLevel > cmd.maxLevel) return replyEphemeral(i, '❌ هذا الأمر غير متاح لرتبتك.', COLORS.danger);
-      if (cmd.team && info?.team !== cmd.team) return replyEphemeral(i, `❌ هذا الأمر خاص بـ **${TEAMS[cmd.team]}**.`, COLORS.danger);
-      const s = staffService.get(i.user.id);
-      if (s?.status === 'suspended' && !['my-record', 'my-performance', 'faq', 'faq-list', 'resign', 'help', 'me', 'my-tasks'].includes(i.commandName)) {
-        return replyEphemeral(i, '⛔ حسابك الإداري موقوف حالياً.', COLORS.danger);
-      }
+      const denied = commandAccessError(cmd, accessContext(i));
+      if (denied) return replyEphemeral(i, `❌ ${denied}`, COLORS.danger);
       return await cmd.execute(i);
     }
 
     if (i.isButton() || i.isAnySelectMenu() || i.isModalSubmit()) {
-      const r = resolveComponent(i.customId);
-      if (!r) return;
-      // ===== فرض الصلاحيات مركزياً على كل مكوّن =====
-      // قبل هذا كان كل معالج مسؤولاً عن فحص نفسه، وثلاثة منها لم تفحص شيئاً.
-      const entry = r.entry;
-      if (entry.adminOnly && !isAdmin) {
-        return replyEphemeral(i, '❌ هذا الإجراء متاح لمن يملك صلاحية **Administrator** فقط.', COLORS.danger);
-      }
-      if (!entry.adminOnly && !isSetup) {
-        const effective = i.staffLevel || (serverManager ? LEVELS.GENERAL_MANAGER : 0);
-        if (entry.serverManagerOnly && !serverManager) {
-          return replyEphemeral(i, '❌ هذا الإجراء متاح لـ **Server Manager** أو **General Manager** فقط.', COLORS.danger);
-        }
-        if (effective < (entry.level || 0)) {
-          return replyEphemeral(i, `❌ هذا الإجراء متاح لـ **${LEVEL_LABELS[entry.level] || 'صلاحية أعلى'}**.`, COLORS.danger);
-        }
-        if (entry.team && info?.team !== entry.team && !serverManager) {
-          return replyEphemeral(i, `❌ هذا الإجراء يخص **${TEAMS[entry.team]}**.`, COLORS.danger);
-        }
-      }
-      return await r.handler(i, r.args);
+      return await dispatchComponent(i);
     }
   } catch (e) {
     logger.log('commands').error(`خطأ في التفاعل ${i.commandName || i.customId}:`, e);

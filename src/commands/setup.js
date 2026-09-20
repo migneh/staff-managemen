@@ -1,11 +1,16 @@
 'use strict';
+const forms = require('../ui/forms');
 const {
-  SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
-  ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle,
+  SlashCommandBuilder, StringSelectMenuBuilder, UserSelectMenuBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
+  ChannelType, PermissionFlagsBits,
 } = require('discord.js');
 const { LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, LEAVE_TYPES, CHANNEL_META } = require('../constants');
 const settings = require('../services/settings');
-const { embed, COLORS, replyEphemeral, progressBar } = require('../utils');
+const staffSync = require('../services/staffSync');
+const staffService = require('../services/staff');
+const { arDigits } = require('../utils');
+const audit = require('../services/audit');
+const { embed, COLORS, replyEphemeral, progressBar, normalizeDigits } = require('../utils');
 
 const ACTIVITY_META = {
   ticket: { label: 'قنوات التكتات', emoji: '🎫', weight: '50%' },
@@ -16,44 +21,41 @@ const ACTIVITY_META = {
 // ===== الصفحة الرئيسية =====
 function homePage() {
   const st = settings.status();
-  const s = settings.load();
-  const roleLine = (team, ranks) => ranks.map(r => `${s.roles[team][r.name] ? '🟢' : '⚪'} ${r.name}${s.roles[team][r.name] ? ` → <@&${s.roles[team][r.name]}>` : ''}`).join('\n');
-  const chanLine = settings.CHANNEL_KEYS.map(k => `${s.channels[k] ? '🟢' : '⚪'} ${CHANNEL_META[k].emoji} ${CHANNEL_META[k].label}${s.channels[k] ? ` → <#${s.channels[k]}>` : ''}`).join('\n');
-  const actLine = Object.entries(ACTIVITY_META).map(([k, m]) => `${m.emoji} ${m.label} (${m.weight}): ${s.activityChannels[k]?.length ? s.activityChannels[k].map(id => `<#${id}>`).join(' ') : '_غير محدد_'}`).join('\n');
-
-  const lp = st.leavePolicy;
-  const rp = st.resignationPolicy;
-  const vacTiming = lp.vacationRoleTiming === 'at_approval' ? 'فور الموافقة' : 'عند بداية الإجازة';
-  const e = embed('⚙️ إعداد Staff Manager', st.complete
-    ? '✅ **الإعداد مكتمل!** البوت جاهز للعمل. يمكنك تعديل أي شيء من الأزرار أدناه.'
-    : `أكمل الخطوات التالية لتشغيل البوت. كل خطوة قائمة اختيار — **بدون نسخ معرفات**.`, st.complete ? COLORS.success : COLORS.primary)
+  const ranksByTeam = { support: SUPPORT_RANKS, moderation: MOD_RANKS, general_management: GENERAL_MANAGEMENT_RANKS };
+  const missing = st.missingRoles[0];
+  const ready = st.complete && st.vacationRoleConfigured;
+  const next = missing
+    ? { id: `setup:roles:${missing.team}:${ranksByTeam[missing.team].findIndex(r => r.name === missing.rank)}`, label: 'متابعة ربط الرتب', hint: `اربط رتبة **${missing.rank}** في ${TEAMS[missing.team]}. يمكنك استخدام المطابقة التلقائية داخل صفحة الرتب.` }
+    : !st.vacationRoleConfigured
+      ? { id: 'setup:roles:system:0', label: 'ربط رتبة الإجازة', hint: 'اربط رتبة **in vacation** ليتمكن البوت من تطبيق حالة الإجازة تلقائياً.' }
+      : !st.complete
+        ? { id: `setup:channels:${settings.CHANNEL_KEYS.indexOf(st.missingChannels[0])}`, label: 'متابعة ربط القنوات', hint: 'اختر القناة الناقصة التالية، أو أنشئ القنوات الناقصة من صفحة القنوات.' }
+        : { id: 'setup:ticket-source', label: 'مصدر سجل التكتات', hint: st.ticketSourceConfigured ? 'الإعداد الأساسي مكتمل. استخدم القائمة لتعديل قسم محدد.' : 'اختياري: اربط مصدر سجل التكتات لتفعيل التسجيل التلقائي لفريق الدعم.' };
+  const e = embed('⚙️ إعداد البوت', ready ? '✅ الإعداد الأساسي مكتمل. يمكنك مراجعة أي قسم من القائمة.' : 'لنجهّز البوت خطوة بخطوة. لا تحتاج إلى نسخ أي معرّف.', ready ? COLORS.success : COLORS.primary)
     .addFields(
-      { name: `1️⃣ الرتب — ${st.rolesDone}/${st.rolesTotal}  ${progressBar(st.rolesDone, st.rolesTotal, 12)}`, value: `**🎧 الدعم الفني**\n${roleLine('support', SUPPORT_RANKS)}\n\n**🛡️ الإشراف**\n${roleLine('moderation', MOD_RANKS)}\n\n**🏛️ الإدارة العامة**\n${roleLine('general_management', GENERAL_MANAGEMENT_RANKS)}\n\n**🏖️ الرتب التلقائية**\n${roleLine('system', SYSTEM_ROLES)}\n${st.vacationRoleConfigured ? `✅ رتبة **in vacation** مرتبطة — تفعيل **${vacTiming}**` : '⚠️ رتبة **in vacation** غير مرتبطة — حددها ليُفعّل البوت الإجازات تلقائياً'}` },
-      { name: `2️⃣ القنوات — ${st.channelsDone}/${st.channelsTotal}  ${progressBar(st.channelsDone, st.channelsTotal, 12)}`, value: chanLine },
-      { name: '3️⃣ قنوات النشاط والتكتات الخارجية', value: actLine + `\n🤖 مصدر سجل التكتات: ${s.channels['ticket-source-logs'] ? `<#${s.channels['ticket-source-logs']}>` : '_غير محدد_'}\n_القنوات غير المحددة تُعتبر عامة (10%)، وقنوات \`ticket-…\` تُكتشف تلقائياً._` },
-      { name: '4️⃣ صلاحية Server Manager', value: st.governanceConfigured ? `<@&${settings.governanceRoleId()}>` : '_اختيارية — إذا لم تحددها فمالك السيرفر فقط يستطيع تعيين الإدارة العامة_' },
-      { name: '5️⃣ سياسات الإجازات والاستقالة', value: `🏖️ الإجازات: **${lp.maxConcurrent}** مجازين كحد أقصى • **${lp.maxDays}** يوم كحد عام • السقف **${lp.maxDaysPer90}**/90 يوم • المعلقة تسقط بعد **${lp.pendingExpireDays}** يوم\n📤 الاستقالة: إشعار **${rp.noticeDays}** يوم • تصعيد بعد **${rp.pendingEscalateDays}** يوم` },
-    )
-    .setFooter({ text: 'الإعدادات تُحفظ فوراً في قاعدة البيانات' });
-
-  const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('setup:roles:support:0').setLabel('رتب الدعم الفني').setEmoji('🎧').setStyle(st.missingRoles.some(m => m.team === 'support') ? ButtonStyle.Primary : ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('setup:roles:moderation:0').setLabel('رتب الإشراف').setEmoji('🛡️').setStyle(st.missingRoles.some(m => m.team === 'moderation') ? ButtonStyle.Primary : ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('setup:roles:general_management:0').setLabel('الإدارة العامة').setEmoji('🏛️').setStyle(st.missingRoles.some(m => m.team === 'general_management') ? ButtonStyle.Primary : ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('setup:roles:system:0').setLabel('رتبة الإجازة').setEmoji('🏖️').setStyle(st.vacationRoleConfigured ? ButtonStyle.Success : ButtonStyle.Primary),
+      { name: 'الخطوة التالية', value: next.hint },
+      { name: '١ · رتب الفريق', value: `${st.rolesDone}/${st.rolesTotal} مرتبطة\n${progressBar(st.rolesDone, st.rolesTotal, 8)}`, inline: true },
+      { name: '٢ · رتبة الإجازة', value: st.vacationRoleConfigured ? '✅ مرتبطة' : '⚪ تحتاج إلى ربط', inline: true },
+      { name: '٣ · القنوات الداخلية', value: `${st.channelsDone}/${st.channelsTotal} مرتبطة\n${progressBar(st.channelsDone, st.channelsTotal, 8)}`, inline: true },
+      { name: 'إعدادات إضافية', value: `سجل التكتات: **${st.ticketSourceConfigured ? 'مرتبط' : 'غير مربوط'}** • Server Manager: **${st.governanceConfigured ? 'مرتبط' : 'مالك السيرفر فقط، أو General Manager'}**\nقنوات النشاط والسياسات متاحة من القائمة. لا يلزم تعديل السياسات الافتراضية للبدء.` },
+    ).setFooter({ text: 'يُحفظ كل تغيير فوراً • يمكنك التوقف والعودة لإكمال الإعداد لاحقاً' });
+  const menu = new StringSelectMenuBuilder().setCustomId('setup:section').setPlaceholder('اختر قسماً للمراجعة أو التعديل…').addOptions(
+    { label: 'رتب الدعم الفني', value: 'support', emoji: '🎧' },
+    { label: 'رتب الإشراف', value: 'moderation', emoji: '🛡️' },
+    { label: 'رتب الإدارة العامة', value: 'general_management', emoji: '🏛️' },
+    { label: 'رتبة الإجازة', value: 'system', emoji: '🏖️' },
+    { label: 'القنوات الداخلية', value: 'channels', emoji: '📁', description: 'ربط يدوي أو مطابقة أو إنشاء القنوات الناقصة' },
+    { label: 'قنوات النشاط', value: 'activity', emoji: '📡' },
+    { label: 'مصدر سجل التكتات', value: 'tickets', emoji: '🤖' },
+    { label: 'مصدر تقييمات الدعم', value: 'ratings', emoji: '⭐', description: 'قراءة نجوم العملاء تلقائياً من رسائل البوت' },
+    { label: 'الإداريون', value: 'staff', emoji: '👥', description: 'تسجيل دفعة واحدة من رتب ديسكورد وحالة كل فريق' },
+    { label: 'صلاحية Server Manager', value: 'governance', emoji: '👑' },
+    { label: 'سياسات الإجازات والاستقالة', value: 'policies', emoji: '📋', description: 'الحدود والمواعيد ووقت تفعيل رتبة الإجازة' },
   );
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('setup:channels:0').setLabel('تحديد القنوات').setEmoji('📁').setStyle(st.missingChannels.length ? ButtonStyle.Primary : ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('setup:autocreate').setLabel('إنشاء القنوات الناقصة تلقائياً').setEmoji('✨').setStyle(ButtonStyle.Secondary).setDisabled(!st.missingChannels.length),
-    new ButtonBuilder().setCustomId('setup:activity').setLabel('قنوات النشاط').setEmoji('📡').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('setup:ticket-source').setLabel('مصدر سجل التكتات').setEmoji('🤖').setStyle(st.ticketSourceConfigured ? ButtonStyle.Success : ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('setup:governance').setLabel('Server Manager').setEmoji('👑').setStyle(st.governanceConfigured ? ButtonStyle.Success : ButtonStyle.Secondary),
-  );
-  const row3 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('setup:policies').setLabel('سياسات الإجازات والاستقالة').setEmoji('📋').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('setup:vacation-timing').setLabel(`تفعيل in vacation: ${vacTiming}`).setEmoji('⏰').setStyle(ButtonStyle.Secondary),
-  );
-  return { embeds: [e], components: [row1, row2, row3] };
+  return { embeds: [e], components: [
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(next.id).setLabel(next.label).setStyle(ButtonStyle.Primary)),
+    new ActionRowBuilder().addComponents(menu),
+  ] };
 }
 
 // ===== صفحة الرتب: رتبة واحدة في كل خطوة مع قائمة اختيار الرتب =====
@@ -90,6 +92,7 @@ function channelsPage(idx) {
     new ButtonBuilder().setCustomId(`setup:channels:${idx - 1}`).setLabel('السابق').setEmoji('◀️').setStyle(ButtonStyle.Secondary).setDisabled(idx === 0),
     new ButtonBuilder().setCustomId(`setup:channels:${idx + 1}`).setLabel('التالي').setEmoji('▶️').setStyle(ButtonStyle.Secondary).setDisabled(idx === keys.length - 1),
     new ButtonBuilder().setCustomId('setup:autochannels').setLabel('مطابقة تلقائية بالاسم').setEmoji('🪄').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('setup:autocreate').setLabel('إنشاء القنوات الناقصة').setEmoji('✨').setStyle(ButtonStyle.Secondary).setDisabled(!settings.status().missingChannels.length),
     new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [e], components: [new ActionRowBuilder().addComponents(select), nav] };
@@ -107,6 +110,29 @@ function activityPage() {
   return { embeds: [e], components: rows };
 }
 
+function ratingsPage() {
+  const channelId = settings.channelId('support-rating-logs');
+  const botId = settings.policy('ratingBotId');
+  const e = embed('⭐ ربط تقييمات الدعم', [
+    '**١. اختر قناة رسائل التقييم.** يجب أن يستطيع البوت رؤيتها وقراءة رسائلها.',
+    '**٢. اختر بوت التقييم (مستحسن).** تركه فارغاً يسمح برسائل أي بوت في القناة المحددة.',
+    '',
+    `القناة: ${channelId ? `<#${channelId}>` : 'غير مربوطة — التتبع متوقف'}`,
+    `البوت المسموح: ${botId ? `<@${botId}>` : 'أي بوت في القناة المختارة'}`,
+    '',
+    'الصيغة: «تم تقييم الاداري» ثم منشنه، «العضو الي قييم» ثم منشن العضو، «عدد النجوم» من ⭐ إلى ⭐⭐⭐⭐⭐.',
+    'تُقرأ الرسائل الجديدة فقط؛ لا يُعاد استيراد تاريخ القناة. الرسالة المكررة لا تُحتسب مرتين. لا يتم الرد في قناة المصدر.',
+    'لعرض النتائج: /my-ratings أو /support-ratings. إزالة اختيار القناة توقف التتبع دون حذف البيانات.',
+  ].join('\n'), COLORS.info);
+  const channel = new ChannelSelectMenuBuilder().setCustomId('setup:rating-channel').setPlaceholder('١ · اختر قناة التقييمات، أو امسح الاختيار للإيقاف')
+    .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setMinValues(0).setMaxValues(1);
+  if (channelId) channel.setDefaultChannels(channelId);
+  const bot = new UserSelectMenuBuilder().setCustomId('setup:rating-bot').setPlaceholder('٢ · اختر بوت التقييم فقط (اختياري)').setMinValues(0).setMaxValues(1);
+  if (botId) bot.setDefaultUsers(botId);
+  return { embeds: [e], components: [new ActionRowBuilder().addComponents(channel), new ActionRowBuilder().addComponents(bot),
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup:home').setLabel('العودة إلى الإعداد').setStyle(ButtonStyle.Secondary))] };
+}
+
 // ===== إعداد مصدر سجل التكتات الخارجي =====
 function ticketSourcePage() {
   const cur = settings.channelId('ticket-source-logs');
@@ -121,6 +147,8 @@ function ticketSourcePage() {
 }
 
 // ===== سياسات الإجازات والاستقالة =====
+const WEEKDAY_NAMES = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
 function policiesPage() {
   const st = settings.status();
   const lp = st.leavePolicy;
@@ -131,6 +159,7 @@ function policiesPage() {
   }).join('\n');
   const e = embed('📋 سياسات الإجازات والاستقالة', [
     `**الإجازات — عام:** ${lp.maxConcurrent} مجازين كحد أقصى • ${lp.maxDays} يوم حد الإجازة الواحدة • المعلقة تسقط بعد ${lp.pendingExpireDays} يوم`,
+    `**الإجازات — متقدم:** ${lp.annualDays ? `رصيد سنوي ${lp.annualDays} يوم • ` : ''}حد تغطية الفريق ${lp.teamCover}${lp.enforceTeamCover ? ' (مفروض)' : ' (تحذير)'} • تصعيد المعلّق بعد ${lp.pendingEscalateHours}س • ${lp.workdayCounting ? `يُحتسب أيام العمل فقط، والراحة: ${(lp.weeklyOffDays || []).map(d => WEEKDAY_NAMES[d]).join('، ') || 'غير محددة'}` : 'يُحتسب كل يوم تقويمي'}`,
     `**الاستقالة:** إشعار ${rp.noticeDays} يوم • تصعيد بعد ${rp.pendingEscalateDays} يوم`,
     '',
     '**قواعد كل نوع إجازة:**',
@@ -141,13 +170,97 @@ function policiesPage() {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('setup:policies-edit-leave').setLabel('تعديل حدود الإجازات').setEmoji('🏖️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('setup:policies-edit-resign').setLabel('تعديل الاستقالة').setEmoji('📤').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('setup:vacation-timing').setLabel(`تبديل التفعيل: ${lp.vacationRoleTiming === 'at_approval' ? 'فور الموافقة' : 'عند البداية'}`).setEmoji('⏰').setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:policies-advanced').setLabel('قواعد متقدمة').setEmoji('🧮').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('setup:policies-reset').setLabel('استعادة الافتراضي').setEmoji('↩️').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [e], components: [row1, row2] };
 }
+
+// ===== قواعد الإجازات المتقدمة =====
+// ===== صفحة الإداريين =====
+function staffPage() {
+  const st = staffSync.snapshot();
+  const teams = TEAMS;
+  const perTeam = staffService.all().reduce((acc, r) => { acc[r.team] = (acc[r.team] || 0) + 1; return acc; }, {});
+  const e = embed('👥 الإداريون', [
+    'التسجيل يحدث **تلقائياً من رتب ديسكورد** — لا ينتظر البوت رسالة من كل عضو.',
+    '',
+    `📚 المسجّلون: **${arDigits(st.total)}** • ✅ نشط: **${arDigits(st.active)}** • 🧪 تجريبي: **${arDigits(st.probation)}**`,
+    `🏖️ إجازة/إيقاف: **${arDigits(st.away)}** • 🚪 خارج الفريق: **${arDigits(st.out)}**`,
+    st.unknown ? `⚠️ **${arDigits(st.unknown)}** سجلاً برتبة لم تُربط بعد — اربطها من صفحات الرتب.` : '✅ كل الرتب المسجّلة مربوطة بإعدادات البوت.',
+    '',
+    `**التوزيع:** ${Object.entries(teams).map(([k, v]) => `${v}: **${arDigits(perTeam[k] || 0)}**`).join(' • ')}`,
+    st.lastSync ? `_آخر مزامنة: ${st.lastSync} UTC_` : '_لم تُجرَ مزامنة يدوية بعد._',
+  ].join('\n'), st.unknown ? COLORS.warning : COLORS.info);
+  return { embeds: [e], components: [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup:staff-sync').setLabel('تسجيل كل الإداريين الآن').setEmoji('🔄').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup:section').setLabel('اختر قسماً').setStyle(ButtonStyle.Secondary).setDisabled(true)),
+  ] };
+}
+
+// ===== نماذج السياسات =====
+const modals = {
+  advancedLeave: () => {
+    const lp = settings.leavePolicy();
+    return {
+      id: 'setup:policies-advanced-modal',
+      title: '🧮 قواعد الإجازات المتقدمة',
+      fields: [
+        forms.field({ id: 'annualDays', label: 'الرصيد السنوي لكل إداري', max: 3, value: String(lp.annualDays || 0),
+          description: '0 = بلا سقف سنوي (يبقى سقف 90 يوماً لكل نوع). الحد الأقصى 365.' }),
+        forms.field({ id: 'teamCover', label: 'أدنى تغطية لكل فريق', max: 2, value: String(lp.teamCover),
+          description: 'أقل عدد حاضرين مقبول من الفريق خلال الإجازة. من 0 إلى 50.' }),
+        forms.field({ id: 'escalateHours', label: 'تصعيد الطلب المعلّق بعد', max: 3, value: String(lp.pendingEscalateHours),
+          description: 'بالساعات: ينبّه البوت قناة الطلبات عند تجاوزها بلا قرار. من 1 إلى 720.' }),
+        forms.select({ id: 'weeklyOff', label: 'أيام الراحة الأسبوعية', required: false, multiple: true,
+          options: WEEKDAY_NAMES.map((label, value) => ({ label, value: String(value) })),
+          values: (lp.weeklyOffDays || []).map(String),
+          description: 'الأيام التي لا تُحتسب من الإجازة. امسح الاختيار لاحتساب الأيام التقويمية.' }),
+        forms.select({ id: 'enforceTeamCover', label: 'عند كسر التغطية', required: true,
+          options: [
+            { label: 'تحذير فقط للمراجع', value: 'no' },
+            { label: 'منع الاعتماد حتى يتغير التاريخ', value: 'yes' },
+          ],
+          values: [lp.enforceTeamCover ? 'yes' : 'no'],
+          description: 'يُطبَّق عند ضغط زر الموافقة على الطلب.' }),
+      ],
+      note: 'تُحفظ القيم فوراً، ويمكن استعادتها من «استعادة الافتراضي». أيام الراحة تؤثر على حساب المدة والسقوف.',
+    };
+  },
+  leavePolicy: ({ policy: lp = {} } = {}) => ({
+    id: 'setup:policies-leave-modal',
+    title: '🏖️ تعديل سياسات الإجازات',
+    fields: [
+      forms.field({ id: 'maxConcurrent', label: 'الحد الأقصى للمجازين معاً', max: 3, value: String(lp.maxConcurrent ?? 0),
+        description: 'أقصى عدد أعضاء في إجازة في الوقت نفسه. من 1 إلى 365.' }),
+      forms.field({ id: 'maxDays', label: 'أطول إجازة', max: 3, value: String(lp.maxDays ?? 0),
+        description: 'أقصى مدة لطلب واحد بالأيام. من 1 إلى 365.' }),
+      forms.field({ id: 'maxDaysPer90', label: 'السقف المتحرك / 90 يوم', max: 3, value: String(lp.maxDaysPer90 ?? 0),
+        description: 'مجموع الأيام المسموح بها لكل نوع خلال 90 يوماً. من 1 إلى 365.' }),
+      forms.field({ id: 'pendingExpireDays', label: 'سقوط المعلّقة بعد', max: 3, value: String(lp.pendingExpireDays ?? 0),
+        description: 'بالأيام: تُلغى الطلبات المعلّقة تلقائياً بعدها. من 1 إلى 365.' }),
+    ],
+    note: 'تُقبل الأرقام العربية (٣٠)، والقيم خارج الحدود تُرفض مع زر تصحيح دون فقدان ما كتبته.',
+  }),
+  resignPolicy: ({ policy: rp = {} } = {}) => ({
+    id: 'setup:policies-resign-modal',
+    title: '📤 تعديل سياسات الاستقالة',
+    fields: [
+      forms.field({ id: 'noticeDays', label: 'فترة الإشعار', max: 3, value: String(rp.noticeDays ?? 0),
+        description: 'أقل مدة إشعار مقبولة بالأيام قبل آخر يوم. من 1 إلى 30.' }),
+      forms.field({ id: 'escalateDays', label: 'تصعيد المعلّقة بعد', max: 3, value: String(rp.escalateDays ?? rp.pendingEscalateDays ?? 0),
+        description: 'بالأيام: يُنبَّه المراجعون للطلب المعلّق بعدها. من 1 إلى 14.' }),
+    ],
+    note: 'الطلب الأقل من الإشعار لا يُرفض تلقائياً، بل يصل للـ Boss مع تحذير واضح.',
+  }),
+};
 
 // ===== إعداد رتبة Server Manager =====
 function governancePage() {
@@ -205,6 +318,7 @@ async function autoCreate(guild, botMember) {
 }
 
 module.exports = {
+  modals,
   commands: [
     {
       data: new SlashCommandBuilder().setName('setup').setDescription('⚙️ إعداد البوت: الرتب والقنوات (بقوائم اختيار — بدون معرفات)')
@@ -216,6 +330,38 @@ module.exports = {
 
   components: {
     'setup:home': async (i) => i.update(homePage()),
+    'setup:rating-channel': async (i) => {
+      settings.setChannel('support-rating-logs', i.values[0] || null);
+      return i.update(ratingsPage());
+    },
+    'setup:rating-bot': async (i) => {
+      const id = i.values[0];
+      if (id && !i.users.get(id)?.bot) return replyEphemeral(i, 'اختر حساب البوت الذي ينشر التقييمات، وليس عضواً بشرياً.', COLORS.warning);
+      settings.setPolicy('ratingBotId', id || null);
+      return i.update(ratingsPage());
+    },
+    'setup:section': async (i) => {
+      const pages = {
+        support: () => rolesPage('support', 0), moderation: () => rolesPage('moderation', 0),
+        general_management: () => rolesPage('general_management', 0), system: () => rolesPage('system', 0),
+        channels: () => channelsPage(0), activity: activityPage, tickets: ticketSourcePage,
+        governance: governancePage, policies: policiesPage, ratings: ratingsPage, staff: staffPage,
+      };
+      const key = i.values[0];
+      return i.update(Object.hasOwn(pages, key) ? pages[key]() : homePage());
+    },
+    'setup:staff-sync': async (i) => {
+      await i.deferUpdate();
+      const guild = i.guild || await i.client.guilds.fetch(i.guildId);
+      const report = await staffSync.syncGuild(guild, { actorId: i.user.id });
+      if (report.error) return i.editReply({ embeds: [embed('⚠️ تعذّرت المزامنة', report.error, COLORS.warning)], components: [] });
+      const back = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('setup:staff').setLabel('حالة الإداريين').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('setup:home').setLabel('الرئيسية').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+      );
+      return i.editReply({ embeds: [staffSync.reportEmbed(report)], components: [back] });
+    },
+    'setup:staff': async (i) => i.update(staffPage()),
     'setup:roles': async (i, [team, idx]) => i.update(rolesPage(team, Number(idx))),
     'setup:channels': async (i, [idx]) => i.update(channelsPage(Number(idx))),
     'setup:activity': async (i) => i.update(activityPage()),
@@ -226,18 +372,10 @@ module.exports = {
       const cur = settings.leavePolicy().vacationRoleTiming || 'at_start';
       const next = cur === 'at_start' ? 'at_approval' : 'at_start';
       settings.setPolicy('vacationRoleTiming', next);
-      return i.update(homePage());
+      return i.update(policiesPage());
     },
     'setup:policies-edit-leave': async (i) => {
-      const lp = settings.leavePolicy();
-      const m = new ModalBuilder().setCustomId('setup:policies-leave-modal').setTitle('🏖️ تعديل سياسات الإجازات');
-      m.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxConcurrent').setLabel('الحد الأقصى للمجازين معاً').setStyle(TextInputStyle.Short).setMaxLength(2).setRequired(true).setValue(String(lp.maxConcurrent))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxDays').setLabel('أطول إجازة (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(lp.maxDays))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('maxDaysPer90').setLabel('السقف المتحرك / 90 يوم').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(lp.maxDaysPer90))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pendingExpireDays').setLabel('سقوط المعلقة بعد (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(lp.pendingExpireDays))),
-      );
-      return i.showModal(m);
+      return forms.open(i, modals.leavePolicy({ policy: settings.leavePolicy() }));
     },
     'setup:policies-leave-modal': async (i) => {
       const vals = {
@@ -252,24 +390,48 @@ module.exports = {
       return i.message?.edit ? null : null;
     },
     'setup:policies-edit-resign': async (i) => {
-      const rp = settings.resignationPolicy();
-      const m = new ModalBuilder().setCustomId('setup:policies-resign-modal').setTitle('📤 تعديل سياسات الاستقالة');
-      m.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('noticeDays').setLabel('فترة الإشعار (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(rp.noticeDays))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('escalateDays').setLabel('تصعيد المعلقة بعد (أيام)').setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(rp.pendingEscalateDays))),
-      );
-      return i.showModal(m);
+      return forms.open(i, modals.resignPolicy({ policy: settings.resignationPolicy() }));
     },
     'setup:policies-resign-modal': async (i) => {
       const noticeDays = Number(i.fields.getTextInputValue('noticeDays'));
       const escalateDays = Number(i.fields.getTextInputValue('escalateDays'));
-      if (!Number.isInteger(noticeDays) || noticeDays < 1 || noticeDays > 30 || !Number.isInteger(escalateDays) || escalateDays < 1 || escalateDays > 14) return replyEphemeral(i, '❌ القيم غير صحيحة.', COLORS.danger);
+      if (!Number.isInteger(noticeDays) || noticeDays < 1 || noticeDays > 30) return replyEphemeral(i, '❌ فترة الإشعار يجب أن تكون بين 1 و30 يوماً.', COLORS.danger);
+      if (!Number.isInteger(escalateDays) || escalateDays < 1 || escalateDays > 14) return replyEphemeral(i, '❌ تصعيد المعلّقة يجب أن يكون بين 1 و14 يوماً.', COLORS.danger);
       settings.setPolicy('resignationNoticeDays', noticeDays);
       settings.setPolicy('resignationEscalateDays', escalateDays);
       return replyEphemeral(i, '✅ تم تحديث سياسات الاستقالة.', COLORS.success);
     },
+    'setup:policies-advanced': async (i) => forms.open(i, modals.advancedLeave()),
+    'setup:policies-advanced-modal': async (i) => {
+      const numbers = {
+        leaveAnnualDays: Number(normalizeDigits(i.fields.getTextInputValue('annualDays')).trim()),
+        leaveTeamCover: Number(normalizeDigits(i.fields.getTextInputValue('teamCover')).trim()),
+        leavePendingEscalateHours: Number(normalizeDigits(i.fields.getTextInputValue('escalateHours')).trim()),
+      };
+      const bounds = { leaveAnnualDays: [0, 365], leaveTeamCover: [0, 50], leavePendingEscalateHours: [0, 720] };
+      for (const [key, value] of Object.entries(numbers)) {
+        const [min, max] = bounds[key];
+        if (!Number.isInteger(value) || value < min || value > max) return replyEphemeral(i, `❌ «${key}» يجب أن يكون رقماً صحيحاً بين ${min} و${max}.`, COLORS.danger);
+      }
+      const weeklyOff = (i.fields.getStringSelectValues?.('weeklyOff') || []).map(Number).filter(d => d >= 0 && d <= 6);
+      const enforce = (i.fields.getStringSelectValues('enforceTeamCover')[0] || 'no') === 'yes';
+      for (const [key, value] of Object.entries(numbers)) settings.setPolicy(key, value);
+      settings.setPolicy('leaveWeeklyOff', weeklyOff);
+      settings.setPolicy('leaveWorkdayCounting', weeklyOff.length > 0);
+      settings.setPolicy('leaveEnforceTeamCover', enforce);
+      audit.record({ action: 'leave_policy_updated', actorId: i.user.id, details: { ...numbers, weeklyOff, enforce }, channelId: i.channelId });
+      const summary = embed('✅ تم حفظ قواعد الإجازات المتقدمة', [
+        `الرصيد السنوي: **${numbers.leaveAnnualDays || 'بلا سقف'}**`,
+        `أدنى تغطية للفريق: **${numbers.leaveTeamCover}** (${enforce ? 'مفروضة عند الاعتماد' : 'تحذير فقط'})`,
+        `تصعيد المعلّق بعد: **${numbers.leavePendingEscalateHours}** ساعة`,
+        `الاحتساب: **${weeklyOff.length ? `أيام العمل فقط — الراحة: ${weeklyOff.map(d => WEEKDAY_NAMES[d]).join('، ')}` : 'كل يوم تقويمي'}**`,
+      ].join('\n'), COLORS.success);
+      await i.reply({ embeds: [summary], ephemeral: true });
+      try { await i.message?.edit?.(policiesPage()); } catch { /* الرسالة قد تكون قديمة */ }
+      return null;
+    },
     'setup:policies-reset': async (i) => {
-      for (const k of ['leaveMaxConcurrent', 'leaveMaxDays', 'leaveMaxDaysPer90', 'leavePendingExpireDays', 'resignationNoticeDays', 'resignationEscalateDays', 'vacationRoleTiming']) settings.resetPolicy(k);
+      for (const k of ['leaveMaxConcurrent', 'leaveMaxDays', 'leaveMaxDaysPer90', 'leavePendingExpireDays', 'resignationNoticeDays', 'resignationEscalateDays', 'vacationRoleTiming', 'leaveAnnualDays', 'leaveTeamCover', 'leavePendingEscalateHours', 'leaveWorkdayCounting', 'leaveWeeklyOff', 'leaveEnforceTeamCover']) settings.resetPolicy(k);
       return i.update(policiesPage());
     },
 

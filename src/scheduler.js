@@ -6,7 +6,7 @@ const reports = require('./services/reports');
 const load = require('./services/load');
 const points = require('./services/points');
 const score = require('./services/score');
-const { ABSENCE, LEAVE_GLOBAL } = require('./constants');
+const { ABSENCE, LEAVE_GLOBAL, LEAVE_TYPES } = require('./constants');
 const settings = require('./services/settings');
 const leaveService = require('./services/leaves');
 const audit = require('./services/audit');
@@ -16,7 +16,17 @@ const backup = require('./services/backup');
 const kit = require('./ui/kit');
 const clock = require('./clock');
 const { INACTIVE_STATUSES } = require('./constants');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const logger = require('./logger').log('scheduler');
+/** نفس أزرار المراجعة المستخدمة في /review-leaves حتى لا تختلف الواجهة بين المسارين. */
+function leaveReviewRow(id) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`leave:approve:${id}`).setLabel('موافقة').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`leave:reject:${id}`).setLabel('رفض').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`leave:suggest:${id}`).setLabel('تعديل مقترح').setEmoji('💡').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`leave:details:${id}`).setLabel('تفاصيل').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
+  );
+}
 const config = require('./config');
 const retention = require('./services/retention');
 
@@ -65,6 +75,23 @@ async function processLeaves(client) {
         await dm(client, r.user_id, { embeds: [embed('⌛ انتهى طلب إجازتك دون مراجعة', `طلبك **#${r.id}** (${r.start_date} → ${r.end_date}) انتهت مدته دون قرار.\nيمكنك تقديم طلب جديد إن احتجت.`, COLORS.gray)] });
       } catch {}
       audit.record({ action: 'leave_auto_expired', targetId: r.user_id, details: { requestId: r.id, reason: 'pending_expired' } });
+    }
+  }
+
+  // 0.5) تصعيد الطلبات المعلّقة التي تجاوزت مدة المراجعة المتفق عليها.
+  const escalateHours = Number(policy.pendingEscalateHours || LEAVE_GLOBAL.pendingEscalateHours || 24);
+  if (escalateHours > 0) {
+    for (const r of pendingRows) {
+      const created = Date.parse(`${(r.created_at || '').replace(' ', 'T')}Z`);
+      if (!Number.isFinite(created)) continue;
+      const hours = Math.floor((Date.now() - created) / 3600000);
+      if (hours < escalateHours) continue;
+      const fresh = db.prepare('SELECT reminders_sent FROM leave_requests WHERE id = ?').get(r.id);
+      if (!leaveService.markReminder(r.id, fresh?.reminders_sent, 'escalate')) continue;
+      try {
+        await sendToChannel(client, 'leave-requests', { embeds: [embed('⏰ طلب بانتظار القرار', `${LEAVE_TYPES[r.leave_type] ? LEAVE_TYPES[r.leave_type] + ' — ' : ''}<@${r.user_id}>\nالطلب **#${r.id}** معلّق منذ **${hours}** ساعة (${r.start_date} → ${r.end_date}).\nيرجى البت فيه، أو استخدم «تعديل مقترح» لتواريخ بديلة.`, COLORS.warning)], components: [leaveReviewRow(r.id)] });
+      } catch (e) { logger.warn(`تعذّر إرسال تصعيد الطلب ${r.id}: ${e.message}`); }
+      audit.record({ action: 'leave_escalated', targetId: r.user_id, details: { requestId: r.id, hours } });
     }
   }
 

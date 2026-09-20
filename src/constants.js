@@ -76,9 +76,10 @@ const CHANNEL_META = {
   'mod-logs': { label: 'سجل الإشراف', emoji: '🛡️', desc: 'الإجراءات الإشرافية' },
   'manager-review': { label: 'مراجعة الإدارة', emoji: '📈', desc: 'طلبات الترقية' },
   'staff-wins': { label: 'إنجازات الفريق', emoji: '🏆', desc: 'ترشيحات وتقدير الزملاء — اختيارية' },
+  'support-rating-logs': { label: 'مصدر تقييمات الدعم', emoji: '⭐', desc: 'قناة رسائل بوت تقييم الدعم — قراءة فقط' },
   'ticket-source-logs': { label: 'مصدر سجل التكتات الخارجي', emoji: '🤖', desc: 'القناة التي يرسل فيها بوت التكتات رسالة الإغلاق — اختيارية' },
 };
-const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs', 'staff-wins'];
+const OPTIONAL_CHANNEL_KEYS = ['ticket-source-logs', 'staff-wins', 'support-rating-logs'];
 const CHANNEL_KEYS = Object.keys(CHANNEL_META).filter(k => !OPTIONAL_CHANNEL_KEYS.includes(k));
 
 // ===== تصنيفات FAQ =====
@@ -123,7 +124,16 @@ const LEAVE_GLOBAL = {
   maxDaysPer90: 30,       // سقف متحرك لكل إداري خلال 90 يوماً
   reminderBeforeDays: 1,  // تذكير قبل البداية
   returnWarnHours: 24,    // تنبيه الإدارة إن لم يعد بعد النهاية
+  annualDays: 0,          // رصيد سنوي لكل إداري (0 = بلا سقف سنوي)
+  teamCover: 1,           //أدنى تغطية مقبولة لكل فريق خلال فترة الإجازة
+  enforceTeamCover: false,// منع الاعتماد عند كسر تغطية الفريق (افتراضياً تحذير فقط)
+  pendingEscalateHours: 24, // تصعيد الطلب المعلّق لفريق المراجعة بعد هذه المدة
+  workdayCounting: false, // احتساب أيام العمل فقط بدل الأيام التقويمية
+  weeklyOff: [],          // أيام الراحة الأسبوعية عند تفعيل احتساب أيام العمل
 };
+
+// أسماء أيام الأسبوع بنفس ترقيم JavaScript (0 = الأحد)
+const WEEKDAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
 // متى تُمنح رتبة `in vacation`
 const VACATION_ROLE_TIMING = { at_start: 'عند بداية الإجازة (موصى به)', at_approval: 'فور الموافقة على الطلب' };
@@ -189,6 +199,11 @@ const POINTS = {
   best_of_month: { label: 'أفضل إداري بالشهر', all: 50 },
   absence: { label: 'غياب بدون إجازة', all: -15 },
   spam: { label: 'سبام', all: -10 },
+  // منح يدوي من الإدارة (القيمة تُمرَّر صراحةً عند المنح، وهذي التسميات للسجل والعرض)
+  manual_boost: { label: 'منح يدوي — تحفيز', all: 0 },
+  manually_helped: { label: 'منح يدوي — مساعدة', all: 0 },
+  manual_correction: { label: 'منح يدوي — تصحيح رصيد', all: 0 },
+  manual_violation: { label: 'خصم يدوي — مخالفة', all: 0 },
 };
 
 // ===== شروط الترقية =====
@@ -243,7 +258,7 @@ const MOD_PROMOTIONS = [
   {
     // تنبيه: رتبة Admin في فريق الإشراف = المستوى 3، وبوابة هذه الترقية 4.
     // لذلك الموافقة هنا من الإدارة العليا (توقيعان) ولا يكفي Admin وحده — النص
-    // القديم «Admin + Head» كان يوهم بأن أي Admin يوقّع. راجع PROMOTION-SYSTEM-REVIEW.md.
+    // القديم «Admin + Head» كان يوهم بأن أي Admin يوقّع. الصيغة الحالية تسمّي من يوقّع فعلاً.
     from: 'Moderator', to: 'Senior Moderator', months: 3, score: 70, points: 200, actions: 30,
     maxWarnings: 1, windowDays: 90, warnWindowDays: 90, minActiveDays: 20, maxWrongDecisions: 2,
     approvers: 'الإدارة العليا — توقيعان', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
@@ -282,7 +297,7 @@ const SCORE_WEIGHTS = {
 module.exports = {
   LEVELS, SUPPORT_RANKS, MOD_RANKS, GENERAL_MANAGEMENT_RANKS, SYSTEM_ROLES, TEAMS, STATUS, INACTIVE_STATUSES, FAQ_CATEGORIES,
   CHANNEL_META, CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS,
-  ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, LEAVE_RULES, LEAVE_GLOBAL, VACATION_ROLE_TIMING,
+  ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, LEAVE_RULES, LEAVE_GLOBAL, VACATION_ROLE_TIMING, WEEKDAYS_AR,
   RESIGNATION_REASONS, RESIGNATION_GLOBAL, MOD_ACTION_TYPES,
   NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS, PROBATION, SCORE_WEIGHTS,
 };

@@ -10,7 +10,7 @@ function valueFor(key, team) {
   return def[team] ?? 0;
 }
 
-/** عصر النقاط الحالي للعضو — كل رتبة عصر مستقل (راجع ROADMAP 2.2) */
+/** عصر النقاط الحالي للعضو — كل رتبة عصر مستقل */
 function currentEpoch(userId) {
   return getDb().prepare('SELECT COALESCE(rank_epoch, 1) e FROM staff_members WHERE user_id = ?').get(userId)?.e ?? 1;
 }

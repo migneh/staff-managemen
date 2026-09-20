@@ -1,5 +1,7 @@
 'use strict';
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
+const forms = require('../ui/forms');
+const { homeRow } = require('../ui/navigation');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
 const { LEVELS, TEAMS, STATUS, WARNING_TYPES } = require('../constants');
 const reports = require('../services/reports');
 const load = require('../services/load');
@@ -21,7 +23,7 @@ function performanceEmbed(r) {
   e.addFields(
     { name: `${scoreEmoji(r.score)} Score ${r.score}/100 — ${r.grade}`, value: `${progressBar(r.score, 100, 20)}\n` + r.factors.map(f => `${progressBar(f.pts, f.max, 5)} **${f.name}** ${f.pts}/${f.max} · ${f.detail}`).join('\n') },
     ...(staff.team === 'support'
-      ? [{ name: '🎫 التكتات', value: `${raw.tickets}`, inline: true }, { name: '⏱️ متوسط الحل', value: raw.avgDuration != null ? `${raw.avgDuration} د` : '—', inline: true }, { name: '⭐ التقييم', value: raw.avgRating != null ? `${raw.avgRating}` : '—', inline: true }]
+      ? [{ name: '🎫 التكتات', value: `${raw.tickets}`, inline: true }, { name: '⏱️ متوسط الحل', value: raw.avgDuration != null ? `${raw.avgDuration} د` : '—', inline: true }, { name: '⭐ تقييم العملاء', value: raw.avgRating != null ? `**${raw.avgRating}/5** · ${raw.ratingCount || 0} تقييم\n${raw.ratingSource === 'external' ? 'من قناة التقييمات' : 'من سجلات التكتات'}` : 'لا توجد تقييمات في هذه الفترة', inline: true }]
       : [{ name: '🛡️ المخالفات المعالجة', value: `${raw.actions}`, inline: true }]),
     { name: '📅 أيام النشاط', value: `${raw.activeDays}/30`, inline: true },
     ...(raw.weightedMessages != null ? [{ name: '📡 وزن النشاط', value: `${raw.messages} رسالة → وزن ${Math.round(raw.weightedMessages)}`, inline: true }] : []),
@@ -99,7 +101,34 @@ function loadEmbed(team, rows, days) {
     .setFooter({ text: 'المؤشر مبني على العمل المسجل في قاعدة البيانات؛ التكتات المفتوحة تحتاج مصدراً منفصلاً.' });
 }
 
+const WEIGHT_LABELS = {
+  helper: [['chat', 'نشاط الشات'], ['presence', 'التواجد'], ['teamInteraction', 'تفاعل الفريق'], ['supervisorRating', 'تقييم المشرف']],
+  support: [['tickets', 'التكتات'], ['speed', 'السرعة والتقييم'], ['chat', 'نشاط الشات'], ['presence', 'التواجد']],
+  moderation: [['actions', 'الإجراءات'], ['speed', 'سرعة الاستجابة'], ['activity', 'النشاط'], ['commitment', 'الالتزام']],
+};
+const modals = {
+  weights: ({ team = 'support', labels = null, current = {} } = {}) => ({
+    id: `score:weightsmodal:${team}`,
+    title: `⚖️ أوزان Score — ${team}`,
+    fields: (labels || WEIGHT_LABELS[team] || WEIGHT_LABELS.support).map(([key, label]) => forms.field({
+      id: key, label, max: 3, value: String(current[key] ?? ''),
+      description: `الوزن الحالي ${current[key] ?? '—'}. عدد صحيح بين 0 و100، والمجموع يجب أن يساوي 100.`,
+    })),
+    note: 'الأوزان تُطبَّق على التقارير الجديدة فور الحفظ، وتُسجَّل في سجل التدقيق.',
+  }),
+  contest: ({ id } = {}) => ({
+    id: `points:contestmodal:${id}`,
+    title: `⚖️ اعتراض على النقطة #${id}`,
+    fields: [
+      forms.field({ id: 'reason', label: 'سبب الاعتراض', style: 'paragraph', max: 500,
+        description: 'اشرح لماذا تعتقد أن الحركة غير صحيحة، مع أي مرجع يدعم كلامك.' }),
+    ],
+    note: 'الاعتراض يفتح مهمة مراجعة للإدارة، ولا يغيّر النقاط تلقائياً.',
+  }),
+};
+
 module.exports = {
+  modals,
   commands: [
     {
       data: new SlashCommandBuilder().setName('my-performance').setDescription('عرض تقرير أدائك الشخصي'),
@@ -107,7 +136,7 @@ module.exports = {
       async execute(i) {
         const s = staffService.get(i.user.id);
         if (!s) return replyEphemeral(i, '❌ غير مسجل كإداري.', COLORS.danger);
-        return i.reply({ embeds: [performanceEmbed(reports.individual(s))], ephemeral: true });
+        return i.reply({ embeds: [performanceEmbed(reports.individual(s))], components: [homeRow()], ephemeral: true });
       },
     },
     {
@@ -188,11 +217,8 @@ module.exports = {
       level: LEVELS.MANAGEMENT,
       async execute(i) {
         const team = i.options.getString('team');
-        const labels = { helper: [['chat', 'نشاط الشات'], ['presence', 'التواجد'], ['teamInteraction', 'تفاعل الفريق'], ['supervisorRating', 'تقييم المشرف']], support: [['tickets', 'التكتات'], ['speed', 'السرعة والتقييم'], ['chat', 'نشاط الشات'], ['presence', 'التواجد']], moderation: [['actions', 'الإجراءات'], ['speed', 'سرعة الاستجابة'], ['activity', 'النشاط'], ['commitment', 'الالتزام']] }[team];
         const current = settings.scoreWeights(team);
-        const modal = new ModalBuilder().setCustomId(`score:weightsmodal:${team}`).setTitle(`⚖️ أوزان Score — ${team}`);
-        modal.addComponents(...labels.map(([key, label]) => new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId(key).setLabel(`${label} (من 100)`).setStyle(TextInputStyle.Short).setMaxLength(3).setRequired(true).setValue(String(current[key])))));
-        return i.showModal(modal);
+        return forms.open(i, modals.weights({ team, current }));
       },
     },
     {
@@ -261,9 +287,7 @@ module.exports = {
     'points:contest': async (i, [id]) => {
       const point = getDb().prepare('SELECT * FROM promotion_points WHERE id = ? AND user_id = ?').get(Number(id), i.user.id);
       if (!point) return replyEphemeral(i, '❌ حركة النقاط غير موجودة أو ليست ضمن سجلك.', COLORS.danger);
-      const modal = new ModalBuilder().setCustomId(`points:contestmodal:${point.id}`).setTitle(`⚖️ اعتراض على النقطة #${point.id}`);
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('اشرح سبب الاعتراض').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(true)));
-      return i.showModal(modal);
+      return forms.open(i, modals.contest({ id: point.id }));
     },
     'points:contestmodal': async (i, [id]) => {
       const point = getDb().prepare('SELECT * FROM promotion_points WHERE id = ? AND user_id = ?').get(Number(id), i.user.id);

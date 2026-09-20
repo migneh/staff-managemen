@@ -43,7 +43,7 @@ module.exports = {
         const rows = files.slice(0, 10).map(f => `• \`${f.name}\` — ${sizeMb(f.size)} • ${kit.tsRelative(f.modifiedAt)}`);
         return i.editReply({
           embeds: [embed(`🗄️ النسخ الاحتياطية (${files.length})`,
-            `${rows.join('\n')}${files.length > 10 ? `\n… و${files.length - 10} نسخة أخرى` : ''}\n${divider}\n**فحص أحدث نسخة:** ${check.ok ? '🟢' : '🔴'} ${check.detail}\n\n**خطوات الاسترجاع:** راجع \`docs/RESTORE.md\``,
+            `${rows.join('\n')}${files.length > 10 ? `\n… و${files.length - 10} نسخة أخرى` : ''}\n${divider}\n**فحص أحدث نسخة:** ${check.ok ? '🟢' : '🔴'} ${check.detail}\n\n**خطوات الاسترجاع:** أوقف البوت ← احتفظ بـ \`data/staff.db\` جانباً ← انسخ النسخة مكانه ← \`PRAGMA integrity_check\` ← ثم شغّل البوت وتحقّق بـ \`/system-status\``,
             check.ok ? COLORS.success : COLORS.danger).setFooter({ text: `آخر فحص: ${clock.nowIso()} بتوقيت UTC` })],
         });
       },
