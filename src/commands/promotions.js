@@ -160,7 +160,7 @@ module.exports = {
 
       promo.review(r.id, 'approved', i.user.id, null);
       audit.record({ action: 'promotion_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, from: rule.from, to: rule.to, approvals: count, needed }, channelId: i.channelId });
-      staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote' });
+      staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote', newEpoch: true });
       points.resetForNewRank(r.user_id); // عصر نقاط جديد بدل صف سلبي مزيف
       const until = points.setCooldown(r.user_id, 'promoted');
       const member = await i.guild.members.fetch(r.user_id).catch(() => null);

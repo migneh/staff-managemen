@@ -482,12 +482,16 @@ function migrate(database) {
   // منع ازدواج نفس الحركة (نفس السبب ونفس المرجع) — كان الخصم الأسبوعي
   // قابلاً للتكرار مرتين عن الأسبوع نفسه عند إعادة تشغيل المهمة.
   // ننظّف التكرارات القديمة أولاً حتى ينجح إنشاء الفهرس الفريد.
-  database.exec(`DELETE FROM promotion_points WHERE id NOT IN (
-    SELECT MAX(id) FROM promotion_points
-    WHERE ref_id IS NOT NULL GROUP BY reason_key, COALESCE(ref_type,''), ref_id
-  ) AND ref_id IS NOT NULL`);
-  database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_points_unique_ref
-    ON promotion_points(reason_key, COALESCE(ref_type,''), ref_id) WHERE ref_id IS NOT NULL`);
+  // فقط ننفذ هذا التنظيف مرة واحدة عند وجود الفهرس الفريد
+  const uniqueIndexExists = database.prepare(`SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_points_unique_ref'`).get();
+  if (!uniqueIndexExists) {
+    database.exec(`DELETE FROM promotion_points WHERE id NOT IN (
+      SELECT MAX(id) FROM promotion_points
+      WHERE ref_id IS NOT NULL GROUP BY reason_key, COALESCE(ref_type,''), ref_id
+    ) AND ref_id IS NOT NULL`);
+    database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_points_unique_ref
+      ON promotion_points(reason_key, COALESCE(ref_type,''), ref_id) WHERE ref_id IS NOT NULL`);
+  }
 
   migrateFaqCategories(database);
 }

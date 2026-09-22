@@ -43,10 +43,12 @@ function ratingDetail(value) {
  * يُقرأ أبداً في Score — الرسالة في أي قناة كانت تساوي 1. الآن صار للوزن أثر حقيقي.
  */
 function weightedMessages(userId, since, until = null) {
-  const end = until ? ' AND created_at < datetime(\'now\', ?)' : '';
-  const params = until ? [userId, since, until] : [userId, since];
+  if (until) {
+    return getDb().prepare(`SELECT COALESCE(SUM(weight), 0) w FROM activity_logs
+      WHERE user_id = ? AND created_at >= datetime('now', ?) AND created_at < datetime('now', ?)`).get(userId, since, until).w;
+  }
   return getDb().prepare(`SELECT COALESCE(SUM(weight), 0) w FROM activity_logs
-    WHERE user_id = ? AND created_at >= datetime('now', ?)` + end).get(...params).w;
+    WHERE user_id = ? AND created_at >= datetime('now', ?)`).get(userId, since).w;
 }
 
 /** بيانات الشهر الخام لإداري */
@@ -75,11 +77,14 @@ function monthlyRaw(userId, days = 30, offsetDays = 0) {
     .get(...timeArgs([userId, since]));
   const n = db.prepare(`SELECT SUM(note_type='positive') pos, SUM(note_type='negative') neg FROM staff_notes WHERE user_id = ? AND created_at >= datetime('now', ?)` + timeRange('created_at'))
     .get(...timeArgs([userId, since]));
-  const lv = until
-    ? db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now', ?))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
-      FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?) AND start_date < date('now', ?)`).get(until, since, userId, since, until)
-    : db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now'))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
+  let lv;
+  if (until) {
+    lv = db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now', ?))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
+      FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?) AND start_date < date('now', ?)`).get(until, since, userId, since, until);
+  } else {
+    lv = db.prepare(`SELECT COALESCE(SUM(julianday(MIN(end_date, date('now'))) - julianday(MAX(start_date, date('now', ?))) + 1), 0) d
       FROM leave_requests WHERE user_id = ? AND status IN ('approved','ended') AND end_date >= date('now', ?)`).get(since, userId, since);
+  }
   return {
     messages: act.msgs, weightedMessages: Math.round((act.weighted || 0) * 100) / 100, activeDays: act.days,
     tickets: t.c, avgRating: rating != null ? Math.round(rating * 100) / 100 : null,

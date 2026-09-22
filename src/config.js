@@ -23,7 +23,10 @@ module.exports = {
   channels: fileConfig.channels || {},
   activityChannels: fileConfig.activityChannels || { ticket: [], staff: [], moderation: [] },
   // اختياري: إذا تم تحديده فلن يقرأ البوت سجلات التكتات إلا من هذا البوت.
-  ticketLogBotId: /^\d+$/.test(process.env.TICKET_LOG_BOT_ID || fileConfig.ticketLogBotId || '') ? (process.env.TICKET_LOG_BOT_ID || fileConfig.ticketLogBotId) : null,
+  ticketLogBotId: (() => {
+    const val = process.env.TICKET_LOG_BOT_ID || fileConfig.ticketLogBotId || '';
+    return /^\d+$/.test(val) ? val : null;
+  })(),
   leave: { maxDays: 30, maxConcurrent: 3, ...(fileConfig.leave || {}) },
   resignation: { noticeDays: 3, ...(fileConfig.resignation || {}) },
   backup: { dir: process.env.BACKUP_DIR || fileConfig.backup?.dir || path.join(__dirname, '..', 'backups'), keep: Number(process.env.BACKUP_KEEP || fileConfig.backup?.keep || 14) },

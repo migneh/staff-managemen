@@ -79,12 +79,12 @@ async function processLeaves(client) {
   }
 
   // 0.5) تصعيد الطلبات المعلّقة التي تجاوزت مدة المراجعة المتفق عليها.
-  const escalateHours = Number(policy.pendingEscalateHours || LEAVE_GLOBAL.pendingEscalateHours || 24);
-  if (escalateHours > 0) {
-    for (const r of pendingRows) {
-      const created = Date.parse(`${(r.created_at || '').replace(' ', 'T')}Z`);
-      if (!Number.isFinite(created)) continue;
-      const hours = Math.floor((Date.now() - created) / 3600000);
+const escalateHours = Number(policy.pendingEscalateHours || LEAVE_GLOBAL.pendingEscalateHours || 24);
+   if (escalateHours > 0) {
+     for (const r of pendingRows) {
+       const created = clock.parseStamp(r.created_at);
+       if (!created || Number.isNaN(created.getTime())) continue;
+       const hours = Math.floor((Date.now() - created.getTime()) / 3600000);
       if (hours < escalateHours) continue;
       const fresh = db.prepare('SELECT reminders_sent FROM leave_requests WHERE id = ?').get(r.id);
       if (!leaveService.markReminder(r.id, fresh?.reminders_sent, 'escalate')) continue;
@@ -109,10 +109,10 @@ async function processLeaves(client) {
     // leaves.syncVacationRole عند الموافقة، وهنا نضمن الرتبة عند بداية الإجازة فعلياً.
     if (r.start_date <= t && r.end_date >= t) {
       if (s && s.status !== 'on_leave' && s.status !== 'resigned') staffService.setStatus(r.user_id, 'on_leave');
-      if (member) {
+      if (member && !r.role_applied_at) {
         // الرتبة مطلوبة عند بداية الإجازة فعلياً، بغض النظر عن توقيت المنح (at_start أو at_approval).
         const roleResult = await staffService.addVacationRole(member);
-        if (roleResult.ok && !r.role_applied_at) db.prepare("UPDATE leave_requests SET role_applied_at = datetime('now') WHERE id = ?").run(r.id);
+        if (roleResult.ok) db.prepare("UPDATE leave_requests SET role_applied_at = datetime('now') WHERE id = ?").run(r.id);
         if (!roleResult.ok && leaveService.markReminder(r.id, r.reminders_sent, 'role_retry')) {
           await sendToChannel(client, 'staff-logs', { embeds: [embed('⚠️ تعذر تفعيل رتبة in vacation', `الإجازة **#${r.id}** لـ <@${r.user_id}> — ${roleResult.missing ? 'الرتبة غير مربوطة في /setup' : roleResult.error?.message || 'صلاحيات'}`, COLORS.warning)] });
         }
@@ -296,7 +296,7 @@ async function weeklyReport(client) {
     if (EXEMPT.includes(m.status)) continue;
     if (m.status === 'probation') continue; // عضو جديد لا يُعاقب قبل أن يبدأ
     if (leaveService.activeForUser(m.user_id).length) continue;
-    const sc = score.compute(m, score.monthlyRaw(m.user_id, 7)).score;
+    const sc = score.compute(m, score.monthlyRaw(m.user_id, 7, 0)).score; // 7 days, no offset
     if (sc >= 80) points.add(m.user_id, 'week_above_80', m.team, { refType: 'week', refId: week });
     else if (sc < 50) below.push({ user: m.user_id, rank: m.rank, score: sc });
   }
@@ -430,6 +430,10 @@ function status() {
   return last;
 }
 
+function clearRunningTasks() {
+  running.clear();
+}
+
 function start(client) {
   const tz = clock.TZ;
   const jobs = [
@@ -464,4 +468,4 @@ function stop() {
   scheduledTasks.length = 0;
 }
 
-module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, processTaskReminders, dailyReport, weeklyReport, monthlyReport, JOBS };
+module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, processTaskReminders, dailyReport, weeklyReport, monthlyReport, JOBS, clearRunningTasks };
