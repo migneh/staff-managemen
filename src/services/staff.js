@@ -3,6 +3,7 @@ const { getDb } = require('../database');
 const { resolveStaff, TEAM_RANKS } = require('./permissions');
 const { nowIso, today } = require('../utils');
 const settings = require('./settings');
+const logger = require('../logger').log('staff');
 
 function get(userId) {
   return getDb().prepare('SELECT * FROM staff_members WHERE user_id = ?').get(userId) || null;
@@ -36,11 +37,11 @@ function ensure(member, { reinstate = false } = {}) {
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(member.id, member.user?.username || member.displayName, info.team, info.rank, initialStatus, nowIso(), nowIso());
     if (initialStatus === 'probation') {
-      try { require('./tasks').ensureOnboarding(member.id); } catch (e) { console.error('فشل إنشاء مهام التأهيل:', e.message); }
+      try { require('./tasks').ensureOnboarding(member.id); } catch (e) { logger.error('فشل إنشاء مهام التأهيل:', e.message); }
     }
     return { ...get(member.id), isNew: true };
   }
-  const updates = {};
+const updates = {};
   const username = member.user?.username || existing.username;
   if (existing.username !== username) updates.username = username;
   if (existing.team !== info.team || existing.rank !== info.rank) {
@@ -48,9 +49,9 @@ function ensure(member, { reinstate = false } = {}) {
     updates.rank = info.rank;
     updates.rank_since = nowIso();
     // الإدارة العامة لا تدخل فترة تجريبية. تغيير الرتبة داخل الفريقين يعيدها فقط عند العضو الجديد.
-    if (existing.status === 'resigned') updates.status = info.team === 'general_management' ? 'active' : 'probation';
+    if (existing.status === 'resigned' && reinstate) updates.status = info.team === 'general_management' ? 'active' : 'probation';
   }
-  if (existing.status === 'resigned') { updates.status = 'active'; updates.joined_at = nowIso(); updates.rank_since = nowIso(); }
+  if (existing.status === 'resigned' && reinstate) { updates.status = 'active'; updates.joined_at = nowIso(); updates.rank_since = nowIso(); }
   if (Object.keys(updates).length) {
     const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
     db.prepare(`UPDATE staff_members SET ${sets}, updated_at = ? WHERE user_id = ?`).run(...Object.values(updates), nowIso(), member.id);
@@ -161,7 +162,7 @@ async function applyRankRoles(member, team, newRank) {
     if (toRemove.length) await member.roles.remove(toRemove, 'تحديث رتبة عبر Staff Manager');
     await member.roles.add(newRoleId, 'تحديث رتبة عبر Staff Manager');
     return true;
-  } catch (e) { console.error('فشل تعديل الرتب:', e.message); return false; }
+  } catch (e) { logger.error('فشل تعديل الرتب:', e.message); return false; }
 }
 
 /** إزالة رتب فريق محدد */
@@ -169,7 +170,7 @@ async function removeTeamRoles(member, team) {
   const roleMap = settings.roles()[team] || {};
   const ids = Object.values(roleMap).filter(id => id && member.roles.cache.has(id));
   if (!ids.length) return true;
-  try { await member.roles.remove(ids, 'إزالة من الفريق عبر Staff Manager'); return true; } catch (e) { console.error('فشل إزالة رتب الفريق:', e.message); return false; }
+  try { await member.roles.remove(ids, 'إزالة من الفريق عبر Staff Manager'); return true; } catch (e) { logger.error('فشل إزالة رتب الفريق:', e.message); return false; }
 }
 
 function vacationRole(member) {
@@ -180,7 +181,7 @@ function vacationRole(member) {
     if (role) return role;
   }
   const normalize = value => String(value || '').toLowerCase().replace(/[\s_-]+/g, '');
-  return member.guild.roles.cache.find(role => ['invacation', 'فيإجازة', 'فيإجازه'].includes(normalize(role.name))) || null;
+  return member.guild.roles.cache.find(role => ['invacation', 'فيإجازة', 'في إجازة'].includes(normalize(role.name))) || null;
 }
 
 async function addVacationRole(member) {
@@ -191,7 +192,7 @@ async function addVacationRole(member) {
     await member.roles.add(role, 'بدء إجازة معتمدة عبر Staff Manager');
     return { ok: true, role };
   } catch (error) {
-    console.error('فشل إضافة رتبة الإجازة:', error.message);
+    logger.error('فشل إضافة رتبة الإجازة:', error.message);
     return { ok: false, error, role };
   }
 }
@@ -203,7 +204,7 @@ async function removeVacationRole(member) {
     await member.roles.remove(role, 'انتهاء الإجازة عبر Staff Manager');
     return { ok: true, role };
   } catch (error) {
-    console.error('فشل إزالة رتبة الإجازة:', error.message);
+    logger.error('فشل إزالة رتبة الإجازة:', error.message);
     return { ok: false, error, role };
   }
 }

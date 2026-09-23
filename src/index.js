@@ -22,8 +22,6 @@ const health = require('./health');
 const settings = require('./services/settings');
 const { deployCommands } = require('./deploy-commands');
 const { embed: buildEmbed, replyEphemeral, COLORS, log: logToChannel, embed, sendToChannel } = require('./utils');
-const staffSync = require('./services/staffSync');
-const { reportEmbed } = staffSync;
 const { TEAMS, LEVELS } = require('./constants');
 
 console.log('[startup] Application modules loaded; checking required configuration...');
@@ -46,17 +44,16 @@ try {
   console.error('[startup] If native bindings are missing, approve the better-sqlite3 install script and run npm rebuild better-sqlite3. Also check DB_PATH and directory write permissions.');
   process.exit(1);
 }
-console.log('[startup] Database ready.');
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages],
+  partials: [Partials.Channel],
+});
+
 // ===== عكس تحذيرات/أخطاء المسجّل إلى قناة السجلات =====
 logger.setMirror((level, scope, message) => {
   const color = level === 'error' ? COLORS.danger : COLORS.warning;
   const emoji = level === 'error' ? '❌' : '⚠️';
   sendToChannel(client, 'staff-logs', { embeds: [buildEmbed(`${emoji} ${scope}`, message.slice(0, 1800), color)] }).catch(() => {});
-});
-
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages],
-  partials: [Partials.Channel],
 });
 
 let loginWarningTimer;
@@ -69,23 +66,8 @@ client.once(Events.ClientReady, async (c) => {
     try {
       if (!config.clientId) config.clientId = c.user.id;
       await deployCommands();
-    } catch (e) { console.error('❌ فشل تسجيل الأوامر:', e.message); }
+    } catch (e) { logger.log('deploy').error('فشل تسجيل الأوامر:', e); }
   }
-
-  // تسجيل كل الإداريين من رتب الديسكورد دفعة واحدة — دون انتظار رسالة من كل عضو.
-  try {
-    const guild = await c.guilds.fetch(config.guildId);
-    const report = await staffSync.syncGuild(guild, { actorId: c.user.id });
-    if (report.error) console.error(`⚠️  تعذّرت مزامنة الإداريين: ${report.error}`);
-    else {
-      console.log(`👥 مزامنة الإداريين: ${report.registered.length} جديد • ${report.updated.length} محدّث • ${report.departures.length} نُزعت رتبه (من ${report.scanned} عضواً)`);
-      if (report.registered.length) {
-        await logToChannel(c, '🆕 دفعة إداريين جدد', reportEmbed(report, { title: '🆕 تسجيل دفعة الإداريين عند التشغيل' }).setDescription(
-          `سُجّل **${report.registered.length}** إدارياً من رتبهم مباشرة:`.concat('\n').concat(report.registered.slice(0, 20).map(r => `<@${r.id}> — **${r.rank}**`).join('\n')),
-        ), COLORS.success);
-      }
-    }
-  } catch (e) { console.error('⚠️  فشل تسجيل الإداريين عند التشغيل:', e.message); }
 
   const st = settings.status();
   if (!st.complete) console.log(`⚙️  الإعداد غير مكتمل (رتب ${st.rolesDone}/${st.rolesTotal} • قنوات ${st.channelsDone}/${st.channelsTotal}) — استخدم /setup داخل السيرفر.`);
@@ -140,7 +122,7 @@ client.on(Events.MessageCreate, async (msg) => {
     if (s?.isNew) await logToChannel(client, '🆕 إداري جديد', `<@${msg.author.id}> — ${s.rank} (${TEAMS[s.team]}) — تم تسجيله تلقائياً${s.status === 'probation' ? ' بحالة تجريبية' : ''}.`, COLORS.success);
     staffService.touchActivity(msg.author.id);
     activity.record(msg.author.id, msg.channel, msg.content);
-  } catch (e) { console.error('خطأ في تتبع الرسالة:', e); }
+  } catch (e) { logger.log('bot').error('خطأ في تتبع الرسالة:', e); }
 });
 
 // ===== تحديث الرتبة عند تغيير رتب الديسكورد =====
@@ -233,7 +215,8 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`🛑 إغلاق (${signal})...`);
-  try { scheduler.stop(); } catch (e) { console.error(e.message); }
+  try { scheduler.clearRunningTasks(); } catch (e) { logger.log('shutdown').error(e.message); }
+  try { scheduler.stop(); } catch (e) { logger.log('shutdown').error(e.message); }
   try { healthServer?.close(); } catch { /* ignore */ }
   try { client.destroy(); } catch { /* ignore */ }
   try { getDb().close(); } catch { /* ignore */ }
@@ -246,7 +229,7 @@ client.on(Events.ShardReady, (id) => console.log(`[discord] Shard ${id} connecte
 client.on(Events.ShardReconnecting, (id) => console.warn(`[discord] Shard ${id} reconnecting...`));
 client.on(Events.ShardDisconnect, (event, id) => {
   console.warn(`[discord] Shard ${id} disconnected (code ${event.code}).`);
-  if (event.code === 4014) console.error('[discord] Enable Server Members Intent and Message Content Intent in Discord Developer Portal > Bot.');
+  if (event.code === 4014) logger.log('discord').error('[discord] Enable Server Members Intent and Message Content Intent in Discord Developer Portal > Bot.');
 });
 client.on(Events.ShardError, (e, id) => logger.log('discord').error(`Shard ${id} connection error:`, e));
 
