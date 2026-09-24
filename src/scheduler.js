@@ -384,6 +384,10 @@ async function monthlyReport(client) {
  */
 const running = new Set();
 const tasks = [];
+const scheduledTasks = [];
+const lastRun = new Map();
+let schedulerStarted = false;
+
 /** قائمة المهام المعروضة في /status */
 const JOBS = [];
 
@@ -435,6 +439,11 @@ function clearRunningTasks() {
 }
 
 function start(client) {
+  if (schedulerStarted) {
+    logger.warn('المجدول يعمل بالفعل — تم تجاهل طلب تشغيل مكرر.');
+    return;
+  }
+  schedulerStarted = true;
   const tz = clock.TZ;
   const jobs = [
     ['absence', '*/30 * * * *', () => checkAbsence(client)],
@@ -455,8 +464,15 @@ function start(client) {
     const scheduled = cron.schedule(expr, run, { timezone: tz });
     scheduledTasks.push(scheduled);
   }
-  // تشغيل أولي خفيف بعد الإقلاع
-  setTimeout(() => { for (const t of tasks) t.run(); }, 10_000);
+  // تشغيل أولي خفيف بعد الإقلاع - فقط المهام التي لا يجب أن تعمل يومياً
+  setTimeout(() => {
+    checkAbsence(client);
+    liftSuspensions(client);
+    processLeaves(client);
+    processResignations(client);
+    processTaskReminders(client);
+    // لا نشغل التقارير اليومية/الأسبوعية/الشهرية هنا لتجنب تكرارها عند إعادة التشغيل
+  }, 10_000);
   logger.info(`⏰ المجدول يعمل (${jobs.length} مهمة • المنطقة الزمنية ${tz}).`);
 }
 
@@ -466,6 +482,7 @@ const lastRun = new Map();
 function stop() {
   for (const t of scheduledTasks) { try { t.stop(); } catch { /* ignore */ } }
   scheduledTasks.length = 0;
+  schedulerStarted = false;
 }
 
 module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, processTaskReminders, dailyReport, weeklyReport, monthlyReport, JOBS, clearRunningTasks };

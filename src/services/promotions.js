@@ -41,7 +41,9 @@ function stability(userId, months, minScore) {
 }
 
 function windowLabel(days) {
-  return days >= 90 ? `${Math.round(days / 30)} شهور` : `${days} يوم`;
+  if (days >= 365) return `${Math.round(days / 365)} سنة`;
+  if (days >= 30) return `${Math.round(days / 30)} شهور`;
+  return `${days} يوم`;
 }
 
 /**

@@ -160,9 +160,24 @@ module.exports = {
 
       promo.review(r.id, 'approved', i.user.id, null);
       audit.record({ action: 'promotion_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, from: rule.from, to: rule.to, approvals: count, needed }, channelId: i.channelId });
-      staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote', newEpoch: true });
-      points.resetForNewRank(r.user_id); // عصر نقاط جديد بدل صف سلبي مزيف
-      const until = points.setCooldown(r.user_id, 'promoted');
+staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote', newEpoch: true });
+       points.resetForNewRank(r.user_id); // عصر نقاط جديد بدل صف سلبي مزيف
+       
+       // تحديد فترة التبريد حسب الرتبة الجديدة (نظام تبريد متدرج)
+       let cooldownType = 'promoted';
+       if (rule.to === 'Support') {
+         cooldownType = 'promoted_helper';
+       } else if (rule.to === 'Support Expert') {
+         cooldownType = 'promoted_support';
+       } else if (rule.to === 'Support Analyst') {
+         cooldownType = 'promoted_expert';
+       } else if (rule.to === 'Supervisor Manager') {
+         cooldownType = 'promoted_analyst';
+       } else if (rule.to === 'Support Office') {
+         cooldownType = 'promoted_supervisor';
+       }
+       
+       const until = points.setCooldown(r.user_id, cooldownType);
       const member = await i.guild.members.fetch(r.user_id).catch(() => null);
       const rolesOk = member ? await staffService.applyRankRoles(member, s.team, rule.to) : false;
 

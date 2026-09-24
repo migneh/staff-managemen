@@ -17,6 +17,49 @@ const LIMIT = 200;
 const drafts = new Map();
 
 const CATEGORIES = {
+  // تكتات
+  ticket_closed: { label: 'تكت مغلق', emoji: '🎫', key: 'ticket_closed' },
+  ticket_rating_5: { label: 'تكت بتقييم 5', emoji: '⭐⭐⭐⭐⭐', key: 'ticket_rating_5' },
+  ticket_rating_4: { label: 'تكت بتقييم 4', emoji: '⭐⭐⭐⭐', key: 'ticket_rating_4' },
+  ticket_rating_low: { label: 'تكت بتقييم 1-2', emoji: '⭐', key: 'ticket_rating_low' },
+  ticket_reopened: { label: 'تكت معاد فتحه', emoji: '🔄', key: 'ticket_reopened' },
+  
+  // مخالفات/إشراف
+  mod_action: { label: 'مخالفة معالجة', emoji: '🛡️', key: 'mod_action' },
+  fast_response: { label: 'استجابة سريعة < 5 د', emoji: '⚡', key: 'fast_response' },
+  wrong_decision: { label: 'قرار خاطئ', emoji: '❌', key: 'wrong_decision' },
+  
+  // أسبوعي/شهري
+  week_above_80: { label: 'أسبوع Score فوق 80', emoji: '📈', key: 'week_above_80' },
+  week_below_50: { label: 'أسبوع Score تحت 50', emoji: '📉', key: 'week_below_50' },
+  
+  // تعاون/مساعدة
+  helped_newbie: { label: 'مساعدة عضو جديد', emoji: '🤝', key: 'helped_newbie' },
+  shoutout: { label: 'تقدير من زميل', emoji: '👏', key: 'shoutout' },
+  complex_case: { label: 'حل تكت/حالة معقدة', emoji: '🔧', key: 'complex_case' },
+  
+  // ملاحظات
+  positive_note: { label: 'ملاحظة إيجابية', emoji: '🟢', key: 'positive_note' },
+  negative_note: { label: 'ملاحظة سلبية', emoji: '🟡', key: 'negative_note' },
+  
+  // إنذارات
+  formal_warning: { label: 'إنذار رسمي', emoji: '🔴', key: 'formal_warning' },
+  verbal_warning: { label: 'إنذار شفهي', emoji: '🟡', key: 'verbal_warning' },
+  
+  // مكافآت
+  best_of_month: { label: 'أفضل إداري بالشهر', emoji: '🏆', key: 'best_of_month' },
+  retention_3m: { label: 'استمرارية 3 أشهر', emoji: '📅', key: 'retention_3m' },
+  retention_6m: { label: 'استمرارية 6 أشهر', emoji: '📅📅', key: 'retention_6m' },
+  retention_12m: { label: 'استمرارية 12 شهر', emoji: '📅📅📅', key: 'retention_12m' },
+  
+  // خصومات
+  absence: { label: 'غياب بدون إجازة', emoji: '🚫', key: 'absence' },
+  spam: { label: 'سبام', emoji: '📨📨📨', key: 'spam' },
+  long_leave_15_21: { label: 'إجازة طويلة 15-21 يوم', emoji: '🏖️📅', key: 'long_leave_15_21' },
+  long_leave_22_28: { label: 'إجازة طويلة 22-28 يوم', emoji: '🏖️📅📅', key: 'long_leave_22_28' },
+  long_leave_29_30: { label: 'إجازة طويلة 29-30 يوم', emoji: '🏖️📅📅📅', key: 'long_leave_29_30' },
+  
+  // يدوي
   boost: { label: 'تحفيز وأداء متميز', emoji: '🌟', key: 'manual_boost' },
   help: { label: 'مساعدة زملاء أو أعضاء', emoji: '🤝', key: 'manually_helped' },
   correction: { label: 'تصحيح رصيد أو تعويض', emoji: '🧾', key: 'manual_correction' },
@@ -64,7 +107,7 @@ function grantCard(d, { done = false, total = null } = {}) {
       value: kit.clip(recent.map(r => `• ${sign(r.points)} — ${r.reason || r.reason_key}${r.counts ? '' : ' _(رتبة سابقة)_'}`).join('\n'), 1024),
     });
   }
-  return e.setFooter({ text: `النقاط التلقائية مستمرة كما هي • تُخصم/تُضاف في الرتبة الحالية فقط • ${POINTS[CATEGORIES[d.category]?.key]?.label || 'إضافة يدوية'}` });
+  return e.setFooter({ text: `النقاط التلقائية مستمرة كما هي • تُخصم/تُضاف في الرتبة الحالية فقط • ${cat.label}` });
 }
 
 function grantRow(token, disabled = false) {
@@ -79,9 +122,35 @@ module.exports = {
     {
       data: new SlashCommandBuilder().setName('give-points').setDescription('منح أو خصم نقاط لإداري يدوياً — مع تأكيد قبل الكتابة')
         .addUserOption(o => o.setName('user').setDescription('الإداري').setRequired(true))
-        .addIntegerOption(o => o.setName('points').setDescription('عدد النقاط (سالب = خصم)').setRequired(true).setMinValue(-500).setMaxValue(500))
-        .addStringOption(o => o.setName('reason').setDescription('السبب — يظهر للعضو وفي السجل').setRequired(true).setMaxLength(200))
+        .addIntegerOption(o => o.setName('points').setDescription('عدد النقاط (سالب = خصم)').setRequired(true).setMinValue(-1000).setMaxValue(1000))
+        .addStringOption(o => o.setName('reason').setDescription('السبب — يظهر للعضو وفي السجل').setRequired(true).setMaxLength(500))
         .addStringOption(o => o.setName('category').setDescription('التصنيف').addChoices(
+          { name: '🎫 تكت مغلق', value: 'ticket_closed' },
+          { name: '⭐⭐⭐⭐⭐ تكت بتقييم 5', value: 'ticket_rating_5' },
+          { name: '⭐⭐⭐⭐ تكت بتقييم 4', value: 'ticket_rating_4' },
+          { name: '⭐ تكت بتقييم 1-2', value: 'ticket_rating_low' },
+          { name: '🔄 تكت معاد فتحه', value: 'ticket_reopened' },
+          { name: '🛡️ مخالفة معالجة', value: 'mod_action' },
+          { name: '⚡ استجابة سريعة < 5 د', value: 'fast_response' },
+          { name: '❌ قرار خاطئ', value: 'wrong_decision' },
+          { name: '📈 أسبوع Score فوق 80', value: 'week_above_80' },
+          { name: '📉 أسبوع Score تحت 50', value: 'week_below_50' },
+          { name: '🤝 مساعدة عضو جديد', value: 'helped_newbie' },
+          { name: '👏 تقدير من زميل', value: 'shoutout' },
+          { name: '🔧 حل تكت/حالة معقدة', value: 'complex_case' },
+          { name: '🟢 ملاحظة إيجابية', value: 'positive_note' },
+          { name: '🟡 ملاحظة سلبية', value: 'negative_note' },
+          { name: '🔴 إنذار رسمي', value: 'formal_warning' },
+          { name: '🟡 إنذار شفهي', value: 'verbal_warning' },
+          { name: '🏆 أفضل إداري بالشهر', value: 'best_of_month' },
+          { name: '📅 استمرارية 3 أشهر', value: 'retention_3m' },
+          { name: '📅📅 استمرارية 6 أشهر', value: 'retention_6m' },
+          { name: '📅📅📅 استمرارية 12 شهر', value: 'retention_12m' },
+          { name: '🚫 غياب بدون إجازة', value: 'absence' },
+          { name: '📨📨📨 سبام', value: 'spam' },
+          { name: '🏖️📅 إجازة طويلة 15-21 يوم', value: 'long_leave_15_21' },
+          { name: '🏖️📅📅 إجازة طويلة 22-28 يوم', value: 'long_leave_22_28' },
+          { name: '🏖️📅📅📅 إجازة طويلة 29-30 يوم', value: 'long_leave_29_30' },
           { name: '🌟 تحفيز وأداء متميز', value: 'boost' },
           { name: '🤝 مساعدة زملاء أو أعضاء', value: 'help' },
           { name: '🧾 تصحيح رصيد أو تعويض', value: 'correction' },
@@ -110,16 +179,20 @@ module.exports = {
       },
     },
     {
-      data: new SlashCommandBuilder().setName('points-overview').setDescription('نظرة سريعة على النقاط: رصيدك، ترتيبك، وآخر الحركات'),
+      data: new SlashCommandBuilder().setName('points-overview').setDescription('نظرة سريعة على النقاط: رصيدك، ترتيبك، وآخر الحركات')
+      .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر (افتراضياً: مختصر)')),
       level: LEVELS.STAFF,
       async execute(i) {
+        const detailed = i.options.getBoolean('detailed') || false;
         const rows = staffService.all().map(m => ({ ...m, total: points.total(m.user_id) }));
         const mine = rows.find(r => r.user_id === i.user.id);
         const rank = mine ? rows.slice().sort((a, b) => b.total - a.total).findIndex(r => r.user_id === i.user.id) + 1 : null;
-        const recent = points.history(i.user.id, 5);
+        const recent = points.history(i.user.id, detailed ? 20 : 5);
         const e = kit.card({
           title: '🎯 نقاطك',
-          description: '_تُحتسب نقاط رتبتك الحالية فقط، ويبقى السجل الكامل متاحاً في `/points-history`._',
+          description: detailed 
+            ? '_يعرض السجل الكامل للنقاط مع إمكانية التصفية عبر `/points-history`._'
+            : '_تُحتسب نقاط رتبتك الحالية فقط، ويبقى السجل الكامل متاحاً في `/points-history`._',
           fields: [
             { name: '💯 الرصيد', value: `${arDigits(mine?.total ?? 0)} نقطة`, inline: true },
             rank ? { name: '🏅 الترتيب', value: `${arDigits(rank)} من ${arDigits(rows.length)}`, inline: true } : null,
@@ -129,6 +202,102 @@ module.exports = {
           color: COLORS.info,
           footer: kit.footerLine('🎯 ملخّص شخصي'),
         });
+        return i.reply({ embeds: [e], ephemeral: true });
+      },
+    },
+    {
+      data: new SlashCommandBuilder().setName('points-history').setDescription('سجل النقاط المفصل مع خيارات التصفية')
+      .addStringOption(o => o.setName('category').setDescription('تصفية حسب الفئة').addChoices(
+        { name: 'جميع الفئات', value: 'all' },
+        { name: '🎫 تكتات', value: 'ticket' },
+        { name: '🛡️ مخالفات وإشراف', value: 'moderation' },
+        { name: '📈 مكافآت أسبوعية/شهرية', value: 'bonus' },
+        { name: '🤝 تعاون ومساعدة', value: 'help' },
+        { name: '📝 ملاحظات', value: 'notes' },
+        { name: '⚠️ إنذارات', value: 'warnings' },
+        { name: '🚫 خصومات', value: 'penalties' },
+        { name: '🌟 منح يدوية', value: 'manual' }
+      ))
+      .addIntegerOption(o => o.setName('days').setDescription('عدد الأيام للأرجاع (الافتراضي: 30)').setMinValue(1).setMaxValue(365))
+      .addBooleanOption(o => o.setName('only-current-epoch').setDescription('عرض نقاط الرتبة الحالية فقط (افتراضياً: نعم)'))
+      .addBooleanOption(o => o.setName('show-epochs').setDescription('عرض عصر النقاط لكل حركة')),
+      level: LEVELS.STAFF,
+      async execute(i) {
+        const categoryFilter = i.options.getString('category') || 'all';
+        const days = i.options.getInteger('days') || 30;
+        const onlyCurrentEpoch = i.options.getBoolean('only-current-epoch') !== false;
+        const showEpochs = i.options.getBoolean('show-epochs') || false;
+        
+        const userId = i.user.id;
+        const since = days > 0 ? clock.addDays(clock.today(), -days) : undefined;
+        
+        const history = points.history(userId, 100, { allEpochs: !onlyCurrentEpoch });
+        
+        // Apply category filter
+        let filteredHistory = history;
+        if (categoryFilter !== 'all') {
+          filteredHistory = history.filter(entry => {
+            const catKey = entry.reason_key;
+            switch(categoryFilter) {
+              case 'ticket':
+                return catKey.startsWith('ticket_');
+              case 'moderation':
+                return ['mod_action', 'fast_response', 'wrong_decision'].includes(catKey);
+              case 'bonus':
+                return ['week_above_80', 'week_below_50', 'best_of_month', 'retention_3m', 'retention_6m', 'retention_12m'].includes(catKey);
+              case 'help':
+                return ['helped_newbie', 'shoutout', 'complex_case'].includes(catKey);
+              case 'notes':
+                return ['positive_note', 'negative_note'].includes(catKey);
+              case 'warnings':
+                return ['formal_warning', 'verbal_warning'].includes(catKey);
+              case 'penalties':
+                return ['absence', 'spam', 'long_leave_15_21', 'long_leave_22_28', 'long_leave_29_30'].includes(catKey);
+              case 'manual':
+                return ['manual_boost', 'manually_helped', 'manual_correction', 'manual_violation'].includes(catKey);
+              default:
+                return true;
+            }
+          });
+        }
+        
+        // Apply time filter
+        if (since) {
+          filteredHistory = filteredHistory.filter(entry => 
+            entry.created_at >= since
+          );
+        }
+        
+        // Limit to most recent 50 entries
+        const displayHistory = filteredHistory.slice(0, 50);
+        
+        const e = kit.card({
+          title: '📊 سجل النقاط المفصل',
+          description: `عرض آخر ${displayHistory.length} حركة${since ? ` من آخر ${days} يوم` : ''}${onlyCurrentEpoch ? '' , ' (كل العصور)'}${showEpochs ? '' , ' (بدون عرض العصور)'}`,
+          fields: [
+            { name: '💰 إجمالي النقاط', value: `${arDigits(points.total(userId, since, { allEpochs: !onlyCurrentEpoch }))}` },
+            { name: '📅 الفترة', value: `${since ? `من ${clock.addDays(clock.today(), -days)} إلى ${clock.today()}` : 'الكل'}` },
+            { name: '🔍 التصفية', value: categoryFilter === 'all' ? 'جميع الفئات' : categoryFilter },
+          ]
+        });
+        
+        if (displayHistory.length === 0) {
+          e.addFields({ name: '📭 لا توجد نقاط', value: 'لا توجد نقاط تطابق معايير التصفية.' });
+        } else {
+          const historyText = displayHistory.map(entry => {
+            const cat = CATEGORIES[entry.reason_key] || { label: entry.reason_key, emoji: '❓' };
+            const epochInfo = showEpochs && entry.epoch ? ` [عصر ${entry.epoch}]` : '';
+            return `${entry.points > 0 ? '🟢 +' : '🔴 '}${Math.abs(entry.points)} — ${cat.emoji} ${cat.label}${epochInfo}\n${truncate(entry.reason, 100)}\n${clock.tsRelative(entry.created_at)}`;
+          }).join('\n\n');
+          
+          e.addFields({ name: '📜 سجل الحركات', value: kit.clip(historyText, 2000) });
+        }
+        
+        e.addFields({
+          name: 'ℹ️ ملاحظات',
+          value: 'استخدم `/points-history` مع خيارات التصفية للعرض المخصص.\nالرموز: 🟢 نقاط مضافة • 🔴 نقاط خصومة'
+        });
+        
         return i.reply({ embeds: [e], ephemeral: true });
       },
     },
@@ -158,7 +327,7 @@ module.exports = {
             fields: [
               { name: '💯 التغيير', value: `**${sign(earned)}** نقطة`, inline: true },
               { name: '📈 رصيدك الآن', value: `**${arDigits(total)}** نقطة`, inline: true },
-              { name: '🎯 الفئة', value: cat.label, inline: true },
+              { name: '🎯 الفئة', value: `${cat.emoji} ${cat.label}`, inline: true },
               { name: '📝 السبب', value: truncate(d.reason, 500), inline: false },
             ],
             color: earned > 0 ? COLORS.success : COLORS.danger,
