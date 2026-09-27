@@ -70,6 +70,8 @@ async function decide(i, id, status) {
    const db = getDb();
    const row = db.prepare("SELECT * FROM recognition_nominations WHERE id = ? AND status = 'pending'").get(Number(id));
    if (!row) return replyEphemeral(i, '❌ الترشيح غير موجود أو تمت مراجعته.', COLORS.danger);
+   // منع اعتماد/رفض ترشيح أنت طرف فيه (سواء كنت المُرشِّح أو المُرشَّح) — تضارب مصالح.
+   if (row.nominator_id === i.user.id || row.target_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك مراجعة ترشيح أنت طرف فيه. يجب أن يراجعه إداري آخر.', COLORS.danger);
    if (status === 'approved') {
      const target = staffService.get(row.target_id);
      if (!target || INACTIVE_STATUSES.includes(target.status)) return replyEphemeral(i, '❌ العضو لم يعد نشطاً، لا يمكن اعتماد الترشيح.', COLORS.danger);

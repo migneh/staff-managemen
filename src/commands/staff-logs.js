@@ -3,6 +3,7 @@ const { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder } = requi
 const { LEVELS } = require('../constants');
 const audit = require('../services/audit');
 const staffService = require('../services/staff');
+const settings = require('../services/settings');
 const { embed, COLORS, replyEphemeral, arDigits } = require('../utils');
 const kit = require('../ui/kit');
 const clock = require('../clock');
@@ -16,8 +17,11 @@ module.exports = {
         .addStringOption(o => o.setName('limit').setDescription('عدد السجلات (الافتراضي: 20, الأقصى: 100)'))
         .addStringOption(o => o.setName('days').setDescription('عدد الأيام السابقة (الافتراضي: 7)'))
         .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفاصيل JSON complète')),
-      level: LEVELS.STAFF,
+      // سجل التدقيق يحتوي إنذارات وملاحظات سرية وأسباب استقالات — كان متاحاً بالخطأ لكل إداري (حتى Helper)؛
+      // يجب أن يطابق صلاحية /audit-log (الإدارة العليا فقط).
+      level: LEVELS.MANAGEMENT,
       async execute(i) {
+        if (!settings.featureToggle('auditExport')) return replyEphemeral(i, '❌ هذا أمر معطّل حالياً.', COLORS.danger);
         const actionFilter = i.options.getString('action');
         const userFilter = i.options.getString('user');
         const limitOpt = i.options.getString('limit');

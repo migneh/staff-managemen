@@ -67,8 +67,9 @@ async function assignMentor(i) {
   const mentorUser = i.options.getUser('mentor');
   
   // التحقق من الصلاحية - فقط الإدارة يمكنهم تعيين المرشدين
-  const executor = staffService.get(i.user.id);
-  if (!executor || ![LEVELS.MANAGEMENT, LEVELS.BOSS, LEVELS.GENERAL_MANAGEMENT, LEVELS.GENERAL_MANAGER].includes(executor.level)) {
+  // ملاحظة: صفوف staff_members لا تملك حقل "level" رقمياً، فكانت هذه المقارنة تفشل دائماً
+  // وتمنع حتى Boss/General Manager من تعيين مرشدين. المستوى الصحيح هو i.staffLevel.
+  if (!(i.staffLevel >= LEVELS.MANAGEMENT)) {
     return replyEphemeral(i, '❌ ليس لديك صلاحية لتعيين مرشدين.', COLORS.danger);
   }
   
@@ -133,8 +134,7 @@ async function removeMentor(i) {
   const user = i.options.getUser('user');
   
   // التحقق من الصلاحية - فقط الإدارة يمكنهم إزالة المرشدين
-  const executor = staffService.get(i.user.id);
-  if (!executor || ![LEVELS.MANAGEMENT, LEVELS.BOSS, LEVELS.GENERAL_MANAGEMENT, LEVELS.GENERAL_MANAGER].includes(executor.level)) {
+  if (!(i.staffLevel >= LEVELS.MANAGEMENT)) {
     return replyEphemeral(i, '❌ ليس لديك صلاحية لإزالة المرشدين.', COLORS.danger);
   }
   
@@ -166,8 +166,7 @@ async function onboardingDashboard(i) {
   
   // التحقق من الصلاحية لعرض لوحة تحكم الآخرين
   if (targetUser && targetUser.id !== i.user.id) {
-    const executor = staffService.get(i.user.id);
-    if (!executor || ![LEVELS.MANAGEMENT, LEVELS.BOSS].includes(executor.level)) {
+    if (!(i.staffLevel >= LEVELS.MANAGEMENT)) {
       return replyEphemeral(i, '❌ ليس لديك صلاحية لعرض لوحة تحكم التأهيل لغيرك.', COLORS.danger);
     }
   }
@@ -244,8 +243,7 @@ async function onboardingDashboard(i) {
   
   // أزرار إتمام المهام إذا كان المستخدم هو الموظف نفسه أو مشرف
   const isSelf = userId === i.user.id;
-  const isManager = staffService.get(i.user.id) && 
-    [LEVELS.MANAGEMENT, LEVELS.BOSS].includes(staffService.get(i.user.id).level);
+  const isManager = i.staffLevel >= LEVELS.MANAGEMENT;
   
   if ((isSelf || isManager) && pendingTasks.length > 0) {
     const buttons = pendingTasks.slice(0, 5).map(task => 

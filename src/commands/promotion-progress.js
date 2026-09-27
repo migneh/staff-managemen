@@ -42,7 +42,7 @@ module.exports = {
         // Build requirement details
         const requirementDetails = promoEval.checks.map(check => {
           const statusIcon = check.pass ? '✅' : '❌';
-          const progressBar = progressBar(
+          const checkBar = progressBar(
             typeof check.actual === 'number' && typeof check.required === 'number' 
               ? Math.min(check.actual, check.required) 
               : check.pass ? 1 : 0,
@@ -55,7 +55,7 @@ module.exports = {
             actualValue = arDigits(actualValue);
           }
           
-          return `${statusIcon} **${check.label}**: ${actualValue} / ${check.required} ${progressBar}`;
+          return `${statusIcon} **${check.label}**: ${actualValue} / ${check.required} ${checkBar}`;
         }).join('\n');
         
         // Build embed

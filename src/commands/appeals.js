@@ -61,6 +61,9 @@ async function decide(i, id, status) {
   const db = getDb();
   const row = db.prepare("SELECT a.*, w.warning_type, w.issued_by, w.reason warning_reason FROM warning_appeals a JOIN warnings w ON w.id = a.warning_id WHERE a.id = ? AND a.status = 'pending'").get(Number(id));
   if (!row) return replyEphemeral(i, '❌ الاستئناف غير موجود أو تمت مراجعته.', COLORS.danger);
+  // منع مراجعة استئناف مقدَّم من نفس الشخص، ومنع مُصدر الإنذار الأصلي من الحكم على استئنافه.
+  if (row.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك مراجعة استئنافك الخاص. يجب أن يراجعه إداري آخر.', COLORS.danger);
+  if (row.issued_by && row.issued_by === i.user.id) return replyEphemeral(i, '❌ لا يمكنك مراجعة استئناف إنذار أصدرته أنت بنفسك.', COLORS.danger);
   let reversed = 0;
 if (status === 'approved') {
      const target = staffService.get(row.user_id);

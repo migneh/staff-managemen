@@ -740,8 +740,18 @@ module.exports = {
              .addStringOption(o => o.setName('id').setDescription('معرف القالب').setRequired(true))
              .addStringOption(o => o.setName('reason').setDescription('السبب (يOverride الافتراضي)'))
              .addIntegerOption(o => o.setName('duration').setDescription('المدة بالأيام (يOverride الافتراضي)'))
-         )
+         ),
+       // كان هذا الأمر بلا level وبلا execute فكان يتعطل في كل استدعاء بخطأ غير متوقع؛
+       // منطق الأوامر الفرعية كان مسجلاً بالخطأ كمكوّنات (components) لا تُستدعى أبداً من هنا.
+       level: LEVELS.STAFF,
+       async execute(i) {
+         const sub = i.options.getSubcommand();
+         if (sub === 'list') return templatesList(i);
+         if (sub === 'create') return templatesCreate(i);
+         if (sub === 'use') return templatesUse(i);
+         return replyEphemeral(i, '❌ أمر غير معروف.', COLORS.danger);
        },
+     },
    ],
 
   components: {
@@ -861,6 +871,8 @@ module.exports = {
       const db = getDb();
       const r = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(Number(id));
       if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
+      // منع الموافقة على طلب إجازة نفسك حتى لو كنت من الإدارة العليا — يجب أن يعتمده شخص آخر.
+      if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك الموافقة على طلب إجازتك الخاص. يجب أن يعتمده إداري آخر.', COLORS.danger);
       const vr = leaveService.validate({ userId: r.user_id, leaveType: r.leave_type, start: r.start_date, end: r.end_date, excludeId: r.id, atApproval: true });
       if (!vr.ok) return replyEphemeral(i, `❌ لا يمكن الموافقة: ${vr.message}${vr.hint ? `\n💡 ${vr.hint}` : ''}`, COLORS.danger);
       db.prepare(`UPDATE leave_requests SET status = 'approved', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?`).run(i.user.id, r.id);
@@ -891,6 +903,7 @@ module.exports = {
       const db = getDb();
       const r = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(Number(id));
       if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
+      if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك مراجعة طلب إجازتك الخاص. يجب أن يراجعه إداري آخر.', COLORS.danger);
       const reason = forms.combine(i);
       if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب سبباً مخصصاً قبل الإرسال.', COLORS.danger);
       db.prepare(`UPDATE leave_requests SET status = 'rejected', reviewed_by = ?, review_reason = ?, reviewed_at = datetime('now') WHERE id = ?`).run(i.user.id, reason, r.id);
@@ -1078,84 +1091,100 @@ module.exports = {
          await i.followUp({ embeds: [reviewCard(r)], components: [reviewRow(r.id)], ephemeral: true });
        }
      },
-     'templates:list': async (i) => {
-       const type = i.options.getString('type') || 'all';
-       let templates;
-       
-       if (type === 'private') {
-         templates = leaveService.listLeaveTemplates({ userId: i.user.id });
-       } else if (type === 'public') {
-         templates = leaveService.listLeaveTemplates({ includePublic: true });
-       } else {
-         // All: user's private + public
-         const userTemplates = leaveService.listLeaveTemplates({ userId: i.user.id });
-         const publicTemplates = leaveService.listLeaveTemplates({ includePublic: true });
-         templates = [...userTemplates, ...publicTemplates];
-       }
-       
-       if (!templates.length) {
-         return replyEphemeral(i, 'لا توجد قوالب إجازة. استخدم `/templates create` لإنشاء أول قالب.', COLORS.gray);
-       }
-       
-       const e = embed('📋 قوالب الإجازة', templates.map(t => 
-         `${t.is_public ? '🌐' : '🔒'} **${t.name}** (${LEAVE_TYPES[t.leave_type]})`
-         + `${t.default_duration ? ` • ${t.default_duration} يوم` : ''}`
-         + `${t.default_reason ? ` • ${t.default_reason}` : ''}`
-         + `${t.description ? `\n  ${t.description}` : ''}`
-       ).join('\n'), COLORS.info);
-       
-       return i.reply({ embeds: [e], ephemeral: true });
-     },
-     'templates:create': async (i) => {
-       const id = i.options.getString('id');
-       const name = i.options.getString('name');
-       const description = i.options.getString('description');
-       const type = i.options.getString('type');
-       const duration = i.options.getInteger('duration');
-       const reason = i.options.getString('reason');
-       const isPublic = i.options.getBoolean('public') ? 1 : 0;
-       
-       const template = leaveService.createLeaveTemplate({
-         id,
-         userId: i.user.id,
-         name,
-         description,
-         leaveType: type,
-         defaultDuration: duration,
-         defaultReason: reason,
-         isPublic
-       });
-       
-       if (!template) return replyEphemeral(i, '❌ فشل إنشاء القالب. قد يكون المعرف مكرراً.', COLORS.danger);
-       
-       audit.record({ action: 'leave_template_created', actorId: i.user.id, details: { templateId: id, name, leaveType: type, isPublic }, channelId: i.channelId });
-       
-       return replyEphemeral(i, `✅ تم إنشاء القالب **${name}** (${LEAVE_TYPES[type]}) ${isPublic ? '🌐 عام' : '🔒 خاص'}.`, COLORS.success);
-     },
-     'templates:use': async (i) => {
-       const id = i.options.getString('id');
-       const reasonOverride = i.options.getString('reason');
-       const durationOverride = i.options.getInteger('duration');
-       
-       const template = leaveService.useLeaveTemplate(id, i.user.id, { reason: reasonOverride, duration_days: durationOverride });
-       
-       if (!template) return replyEphemeral(i, '❌ القالب غير موجود أو لا صلاحيات له.', COLORS.danger);
-       
-       // Save as draft and show quick card
-       const draft = saveDraft(i, { 
-         leaveType: template.leave_type, 
-         start: null, 
-         end: null, 
-         days: template.duration_days, 
-         reason: template.reason, 
-         attachment: null,
-         templateId: template.id 
-       });
-       
-       return i.reply({ embeds: [quickCard(draft)], ephemeral: true });
-     },
    },
 };
+
+// معرّف قالب آمن: أحرف/أرقام/شرطة سفلية فقط لمنع قيم غريبة تُخزَّن كمفتاح أساسي.
+const TEMPLATE_ID_RE = /^[a-zA-Z0-9_-]{2,40}$/;
+
+async function templatesList(i) {
+  const type = i.options.getString('type') || 'all';
+  let templates;
+
+  if (type === 'private') {
+    templates = leaveService.listLeaveTemplates({ userId: i.user.id });
+  } else if (type === 'public') {
+    templates = leaveService.listLeaveTemplates({ includePublic: true });
+  } else {
+    // الكل: قوالبي الخاصة + العامة (بلا تكرار)
+    const userTemplates = leaveService.listLeaveTemplates({ userId: i.user.id });
+    const publicTemplates = leaveService.listLeaveTemplates({ includePublic: true }).filter(t => t.user_id !== i.user.id);
+    templates = [...userTemplates, ...publicTemplates];
+  }
+
+  if (!templates.length) {
+    return replyEphemeral(i, 'لا توجد قوالب إجازة. استخدم `/templates create` لإنشاء أول قالب.', COLORS.gray);
+  }
+
+  const e = embed('📋 قوالب الإجازة', templates.map(t =>
+    `${t.is_public ? '🌐' : '🔒'} **${t.name}** \`${t.id}\` (${LEAVE_TYPES[t.leave_type] || t.leave_type})`
+    + `${t.default_duration ? ` • ${t.default_duration} يوم` : ''}`
+    + `${t.default_reason ? ` • ${t.default_reason}` : ''}`
+    + `${t.description ? `\n  ${t.description}` : ''}`
+  ).join('\n'), COLORS.info);
+
+  return i.reply({ embeds: [e], ephemeral: true });
+}
+
+async function templatesCreate(i) {
+  const id = (i.options.getString('id') || '').trim();
+  const name = i.options.getString('name');
+  const description = i.options.getString('description');
+  const type = i.options.getString('type');
+  const duration = i.options.getInteger('duration');
+  const reason = i.options.getString('reason');
+  const wantsPublic = i.options.getBoolean('public') || false;
+
+  if (!TEMPLATE_ID_RE.test(id)) return replyEphemeral(i, '❌ المعرف يجب أن يكون حروفاً/أرقاماً إنجليزية أو شرطة سفلية (2-40 حرفاً)، مثل weekly_family.', COLORS.danger);
+  // قالب عام يظهر لكل الفريق — يتطلب صلاحية أعلى من موظف عادي لمنع ازدحام القوالب المشتركة بمحتوى غير مراجَع.
+  if (wantsPublic && (i.staffLevel || 0) < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ إنشاء قالب عام للجميع يتطلب صلاحية الإدارة.', COLORS.danger);
+  if (leaveService.getLeaveTemplate(id)) return replyEphemeral(i, `❌ المعرف \`${id}\` مستخدم مسبقاً. اختر معرفاً آخر.`, COLORS.danger);
+
+  let template;
+  try {
+    template = leaveService.createLeaveTemplate({
+      id,
+      userId: i.user.id,
+      name,
+      description,
+      leaveType: type,
+      defaultDuration: duration,
+      defaultReason: reason,
+      isPublic: wantsPublic ? 1 : 0,
+    });
+  } catch {
+    template = null;
+  }
+
+  if (!template) return replyEphemeral(i, '❌ فشل إنشاء القالب. قد يكون المعرف مكرراً.', COLORS.danger);
+
+  audit.record({ action: 'leave_template_created', actorId: i.user.id, details: { templateId: id, name, leaveType: type, isPublic: wantsPublic }, channelId: i.channelId });
+
+  return replyEphemeral(i, `✅ تم إنشاء القالب **${name}** (${LEAVE_TYPES[type] || type}) ${wantsPublic ? '🌐 عام' : '🔒 خاص'}.`, COLORS.success);
+}
+
+async function templatesUse(i) {
+  const id = i.options.getString('id');
+  const reasonOverride = i.options.getString('reason');
+  const durationOverride = i.options.getInteger('duration');
+
+  const template = leaveService.useLeaveTemplate(id, i.user.id, { reason: reasonOverride, duration_days: durationOverride });
+
+  if (!template) return replyEphemeral(i, '❌ القالب غير موجود أو لا صلاحيات لك عليه.', COLORS.danger);
+
+  // حفظ كمسودة وعرض بطاقة الاختيار السريع (نفس مسار /request-leave)
+  const draft = saveDraft(i, {
+    leaveType: template.leave_type,
+    start: null,
+    end: null,
+    days: template.duration_days,
+    reason: template.reason,
+    attachment: null,
+    templateId: template.id,
+  });
+
+  return i.reply({ embeds: [quickCard(draft)], ephemeral: true });
+}
 
 function covText(cov) {
   if (cov.peak >= cov.max) return `⚠️ **التغطية ممتلئة** ${kit.coverageBar(cov.peak, cov.max)} — قد يُرفض الطلب`;
