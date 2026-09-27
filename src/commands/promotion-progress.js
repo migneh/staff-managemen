@@ -1,6 +1,7 @@
 'use strict';
 const { SlashCommandBuilder } = require('discord.js');
 const { LEVELS, TEAMS, STATUS } = require('../constants');
+const settings = require('../services/settings');
 const staffService = require('../services/staff');
 const promotions = require('../services/promotions');
 const points = require('../services/points');
@@ -15,8 +16,9 @@ module.exports = {
       data: new SlashCommandBuilder().setName('promotion-progress').setDescription('عرض تفصيلي لتقدمك نحو الترقية القادمة')
         .addBooleanOption(o => o.setName('show-remaining').setDescription('عرض المتطلبات المتبقية فقط')),
       level: LEVELS.STAFF,
-      async execute(i) {
-        const showRemainingOnly = i.options.getBoolean('show-remaining') || false;
+async execute(i) {
+         if (!settings.featureToggle('promotionProgress')) return replyEphemeral(i, '❌ هذا الأمر معطّل حالياً.', COLORS.danger);
+         const showRemainingOnly = i.options.getBoolean('show-remaining') || false;
         const userId = i.user.id;
         const member = staffService.get(userId);
         if (!member) return replyEphemeral(i, '❌ غير مسجل كإداري.', COLORS.danger);
@@ -69,10 +71,10 @@ module.exports = {
             { name: '📋 متطلبات الترقية', value: requirementDetails.slice(0, 1024) },
           ],
           color: promoEval.eligible ? COLORS.success : COLORS.warning,
-          footer: kit.footerLine(
+footer: kit.footerLine(
             promoEval.eligible 
-              ? `✅ مؤهل للتقدم للترقية! استخدم \`/request-promotion\` للتقديم` 
-              : `⏳ retire remaining: ${monthsToNextRank > 0 ? `${arDigits(monthsToNextRank)} شهر` : '	time'} | ${pointsToNextRank > 0 ? `${arDigits(pointsToNextRank)} نقطة` : '	time'}${
+              ? `✅ مؤهل للترقية! استخدم \`/request-promotion\` للتقديم` 
+              : `⏳ المتبقّي: ${monthsToNextRank > 0 ? `${arDigits(monthsToNextRank)} شهر` : '—'} | ${pointsToNextRank > 0 ? `${arDigits(pointsToNextRank)} نقطة` : '—'}${
                   promoEval.checks.some(c => !c.pass && c.label.includes('التقييم')) ? ' | التقييم غير كافٍ' : ''
                 }`
           ),

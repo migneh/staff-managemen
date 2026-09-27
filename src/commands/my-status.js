@@ -1,6 +1,7 @@
 'use strict';
 const { SlashCommandBuilder } = require('discord.js');
 const { LEVELS, TEAMS, STATUS } = require('../constants');
+const settings = require('../services/settings');
 const activity = require('../services/activity');
 const staffService = require('../services/staff');
 const points = require('../services/points');
@@ -16,8 +17,9 @@ module.exports = {
       data: new SlashCommandBuilder().setName('my-status').setDescription('عرض حالتك الحالية: النشاط، النقاط، والترقية')
         .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر')),
       level: LEVELS.STAFF,
-      async execute(i) {
-        const detailed = i.options.getBoolean('detailed') || false;
+async execute(i) {
+         if (!settings.featureToggle('myStatusCommand')) return replyEphemeral(i, '❌ هذا الأمر معطّل حالياً.', COLORS.danger);
+         const detailed = i.options.getBoolean('detailed') || false;
         const userId = i.user.id;
         const member = staffService.get(userId);
         if (!member) return replyEphemeral(i, '❌ غير مسجل كإداري.', COLORS.danger);
@@ -78,7 +80,7 @@ module.exports = {
           
           e.addFields({
             name: `🎯 الترقية القادمة: ${promoEval.rule.to}`,
-            value: `${progressBar(progressedChecks, totalChecks, 10)} **${passedChecks}/${totalChecks}** شرط مكتمل\n${promoEval.eligible ? '✅ مؤهل للتقدم' : '❌ غير مؤهل actuellement'}\n${pointsToNextRank > 0 ? `💔 تحتاج ${arDigits(pointsToNextRank)} نقطة إضافية` : '✅ نقاط كافية للترقية'}`,
+            value: `${progressBar(passedChecks, totalChecks, 10)} **${passedChecks}/${totalChecks}** شرط مكتمل\n${promoEval.eligible ? '✅ مؤهل للتقدم' : '❌ غير مؤهل actuellement'}\n${pointsToNextRank > 0 ? `💔 تحتاج ${arDigits(pointsToNextRank)} نقطة إضافية` : '✅ نقاط كافية للترقية'}`,
           });
           
           if (detailed) {

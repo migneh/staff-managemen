@@ -2,6 +2,7 @@
 const forms = require('../ui/forms');
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, UserSelectMenuBuilder } = require('discord.js');
 const { LEVELS, WARNING_TYPES, NOTE_TYPES, POINTS, COOLDOWNS, STATUS } = require('../constants');
+const settings = require('../services/settings');
 const { getDb } = require('../database');
 const points = require('../services/points');
 const staffService = require('../services/staff');
@@ -127,6 +128,7 @@ module.exports = {
           )),
       level: LEVELS.SUPERVISOR,
       async execute(i) {
+        if (!settings.featureToggle('punishmentSystem')) return replyEphemeral(i, '❌ نظام العقوبات معطّل حالياً.', COLORS.danger);
         const user = i.options.getUser('user');
         const type = i.options.getString('type');
         const target = staffService.get(user.id);
@@ -149,6 +151,7 @@ module.exports = {
           )),
       level: LEVELS.SUPERVISOR,
       async execute(i) {
+        if (!settings.featureToggle('punishmentSystem')) return replyEphemeral(i, '❌ نظام العقوبات معطّل حالياً.', COLORS.danger);
         const user = i.options.getUser('user');
         const type = i.options.getString('type');
         const target = staffService.get(user.id);
