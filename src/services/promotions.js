@@ -1,7 +1,6 @@
 'use strict';
 const { getDb } = require('../database');
 const { SUPPORT_PROMOTIONS, MOD_PROMOTIONS, PROBATION } = require('../constants');
-const points = require('./points');
 const score = require('./score');
 const clock = require('../clock');
 
@@ -64,20 +63,15 @@ function evaluate(staff) {
   const warnSince = clock.addDays(today, -warnWindowDays);
 
   const sc = score.compute(staff);
-  const pts = points.total(staff.user_id);
   const months = clock.monthsSince(staff.rank_since);
-  const cd = points.activeCooldown(staff.user_id);
 
-  const warnCount = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND voided_at IS NULL AND date(created_at) >= ? AND warning_type != 'verbal'`).get(staff.user_id, warnSince).c;
-  const wrongDecisions = db.prepare(`SELECT COUNT(*) c FROM promotion_points WHERE user_id = ? AND reason_key = 'wrong_decision' AND date(created_at) >= ?`).get(staff.user_id, since).c;
-  const helpedNewbie = db.prepare(`SELECT COUNT(*) c FROM promotion_points WHERE user_id = ? AND reason_key = 'helped_newbie' AND date(created_at) >= ?`).get(staff.user_id, since).c;
+const warnCount = db.prepare(`SELECT COUNT(*) c FROM warnings WHERE user_id = ? AND voided_at IS NULL AND date(created_at) >= ? AND warning_type != 'verbal'`).get(staff.user_id, warnSince).c;
 
   const checks = [];
   const ok = (label, pass, actual, required) => checks.push({ label, pass, actual, required });
 
   ok('مدة الخدمة بالرتبة', months >= rule.months, `${months.toFixed(1)} شهر`, `${rule.months} شهر`);
   ok('الـ Score', sc.score >= rule.score, `${sc.score}`, `${rule.score}+`);
-  ok('نقاط الترقية', pts >= rule.points, `${pts}`, `${rule.points}`);
 
 if (staff.team === 'support') {
      const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, SUM(rating IS NOT NULL) rated, AVG(duration) avg_duration FROM ticket_metrics
@@ -105,28 +99,24 @@ if (staff.team === 'support') {
            : `${staff.supervisor_rating}/25${age != null ? ` (قبل ${age} يوم)` : ''}`;
        ok('تقييم المشرف', rated, actual, `تقييم خلال ${RATING_VALID_DAYS} يوماً`);
      }
-     if (rule.requiresHelpedNewbie) ok('مساعدة الأعضاء الجدد', helpedNewbie > 0, `${helpedNewbie} مرة`, 'مرة واحدة على الأقل');
-     // Check fast response time requirement
-     if (rule.fastResponseRequired) {
-       let maxResponseTime = 0;
-       if (rule.to === 'Support Expert') maxResponseTime = 15; // < 15 minutes
-       else if (rule.to === 'Support Analyst') maxResponseTime = 10; // < 10 minutes
-       else if (rule.to === 'Supervisor Manager') maxResponseTime = 5; // < 5 minutes
-       else if (rule.to === 'Support Office') maxResponseTime = 5; // < 5 minutes
-       
-       const avgDuration = t.avg_duration || 0;
-       const passed = avgDuration > 0 && avgDuration <= maxResponseTime;
-       ok(`متوسط سرعة الاستجابة (${windowLabel(windowDays)})`, passed,
-         `${Math.round(avgDuration)} دقيقة`, `${maxResponseTime}+ دقيقة`);
-     }
-   } else {
-    const a = db.prepare(`SELECT COUNT(*) c, AVG(CAST(duration AS REAL)) avg_duration FROM mod_actions
-       WHERE moderator_id = ? AND date(created_at) >= ?`).get(staff.user_id, since);
-ok(`المخالفات المعالجة (${windowLabel(windowDays)})`, a.c >= rule.actions, `${a.c}`, `${rule.actions}+`);
-if (rule.maxWrongDecisions != null) {
-       ok('القرارات الخاطئة', wrongDecisions <= rule.maxWrongDecisions, `${wrongDecisions}`, `أقصى ${rule.maxWrongDecisions}`);
-     }
-     if (rule.requireConflictResolution) ok('حل النزاعات', sc.raw?.actions >= 5, `${sc.raw?.actions ?? 0} إجراء`, 'سجل إجراءات كافٍ');
+      // Check fast response time requirement
+      if (rule.fastResponseRequired) {
+        let maxResponseTime = 0;
+        if (rule.to === 'Support Expert') maxResponseTime = 15; // < 15 minutes
+        else if (rule.to === 'Support Analyst') maxResponseTime = 10; // < 10 minutes
+        else if (rule.to === 'Supervisor Manager') maxResponseTime = 5; // < 5 minutes
+        else if (rule.to === 'Support Office') maxResponseTime = 5; // < 5 minutes
+        
+        const avgDuration = t.avg_duration || 0;
+        const passed = avgDuration > 0 && avgDuration <= maxResponseTime;
+        ok(`متوسط سرعة الاستجابة (${windowLabel(windowDays)})`, passed,
+          `${Math.round(avgDuration)} دقيقة`, `${maxResponseTime}+ دقيقة`);
+      }
+    } else {
+     const a = db.prepare(`SELECT COUNT(*) c, AVG(CAST(duration AS REAL)) avg_duration FROM mod_actions
+        WHERE moderator_id = ? AND date(created_at) >= ?`).get(staff.user_id, since);
+ ok(`المخالفات المعالجة (${windowLabel(windowDays)})`, a.c >= rule.actions, `${a.c}`, `${rule.actions}+`);
+      if (rule.requireConflictResolution) ok('حل النزاعات', sc.raw?.actions >= 5, `${sc.raw?.actions ?? 0} إجراء`, 'سجل إجراءات كافٍ');
      // Check fast response time requirement for moderation team
      if (rule.fastResponseRequired) {
        let maxResponseTime = 0;
@@ -153,10 +143,9 @@ const avgDuration = a.avg_duration || 0;
       `${rule.stableMonths} تقارير متصلة ≥ ${rule.stableMinScore}`);
   }
 
-  ok('فترة التبريد', !cd, cd ? `حتى ${cd.until}` : 'لا يوجد', 'لا يوجد');
   ok('الحالة', staff.status === 'active' || staff.status === 'probation', staff.status, 'active');
 
-  return { rule, eligible: checks.every(c => c.pass), checks, score: sc.score, points: pts, months, windowDays, warnWindowDays };
+  return { rule, eligible: checks.every(c => c.pass), checks, score: sc.score, months, windowDays, warnWindowDays };
 }
 
 function pendingRequest(userId) {

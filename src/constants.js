@@ -170,65 +170,14 @@ const MOD_ACTION_TYPES = { warn: 'تحذير', timeout: 'تايم أوت', kick:
 
 // ===== الملاحظات والإنذارات =====
 const NOTE_TYPES = {
-  positive: { label: 'ملاحظة إيجابية', emoji: '🟢', points: 5, minLevel: LEVELS.SUPERVISOR },
-  negative: { label: 'ملاحظة سلبية', emoji: '🟡', points: -10, minLevel: LEVELS.SUPERVISOR },
+  positive: { label: 'ملاحظة إيجابية', emoji: '🟢', minLevel: LEVELS.SUPERVISOR },
+  negative: { label: 'ملاحظة سلبية', emoji: '🟡', minLevel: LEVELS.SUPERVISOR },
 };
 const WARNING_TYPES = {
-  verbal: { label: 'إنذار شفهي', emoji: '🟡', points: -10, freezeDays: 0, minLevel: LEVELS.SUPERVISOR },
-  first: { label: 'إنذار أول', emoji: '🟠', points: -20, freezeDays: 14, minLevel: LEVELS.MANAGEMENT },
-  second: { label: 'إنذار ثاني', emoji: '🔴', points: -20, freezeDays: 14, minLevel: LEVELS.MANAGEMENT },
-  final: { label: 'إنذار أخير', emoji: '🔴', points: -20, freezeDays: 60, suspend: true, minLevel: LEVELS.BOSS },
-};
-
-// ===== نقاط الترقية (محدثة حسب النظام v3.0) =====
-const POINTS = {
-  // إيجابي - تكتات
-  ticket_closed: { label: 'تكت مغلق', support: 2 },
-  ticket_rating_5: { label: 'تكت بتقييم 5', support: 5 },
-  ticket_rating_4: { label: 'تكت بتقييم 4', support: 2 },
-  ticket_rating_low: { label: 'تكت بتقييم 1-2', support: -3 },
-  ticket_reopened: { label: 'تكت معاد فتحه', support: -5 },
-  
-  // إيجابي - مخالفات/إشراف
-  mod_action: { label: 'مخالفة معالجة', moderation: 3 },
-  fast_response: { label: 'استجابة سريعة < 5 د', moderation: 5 },
-  wrong_decision: { label: 'قرار خاطئ', moderation: -15 },
-  
-  // أسبوعي/شهري
-  week_above_80: { label: 'أسبوع Score فوق 80', all: 10 },
-  week_below_50: { label: 'أسبوع Score تحت 50', all: -10 },
-  
-  // تعاون/مساعدة
-  helped_newbie: { label: 'مساعدة عضو جديد', all: 15 },
-  shoutout: { label: 'تقدير من زميل', all: 5 },
-  complex_case: { label: 'حل تكت/حالة معقدة', all: 10 },
-  
-  // ملاحظات
-  positive_note: { label: 'ملاحظة إيجابية', all: 5 },
-  negative_note: { label: 'ملاحظة سلبية', all: -10 },
-  
-  // إنذارات
-  formal_warning: { label: 'إنذار رسمي', all: -20 },
-  verbal_warning: { label: 'إنذار شفهي', all: -10 },
-  
-  // مكافآت
-  best_of_month: { label: 'أفضل إداري بالشهر', all: 50 },
-  retention_3m: { label: 'استمرارية 3 أشهر', all: 30 },
-  retention_6m: { label: 'استمرارية 6 أشهر', all: 75 },
-  retention_12m: { label: 'استمرارية 12 شهر', all: 200 },
-  
-  // خصومات
-  absence: { label: 'غياب بدون إجازة', all: -15 },
-  spam: { label: 'سبام', all: -10 },
-  long_leave_15_21: { label: 'إجازة طويلة 15-21 يوم', all: -5 },
-  long_leave_22_28: { label: 'إجازة طويلة 22-28 يوم', all: -10 },
-  long_leave_29_30: { label: 'إجازة طويلة 29-30 يوم', all: -15 },
-  
-  // منح يدوي من الإدارة (القيمة تُمرَّر صراحةً عند المنح، وهذي التسميات للسجل والعرض)
-  manual_boost: { label: 'منح يدوي — تحفيز', all: 0 },
-  manually_helped: { label: 'منح يدوي — مساعدة', all: 0 },
-  manual_correction: { label: 'منح يدوي — تصحيح رصيد', all: 0 },
-  manual_violation: { label: 'خصم يدوي — مخالفة', all: 0 },
+  verbal: { label: 'إنذار شفهي', emoji: '🟡', freezeDays: 0, minLevel: LEVELS.SUPERVISOR },
+  first: { label: 'إنذار أول', emoji: '🟠', freezeDays: 14, minLevel: LEVELS.MANAGEMENT },
+  second: { label: 'إنذار ثاني', emoji: '🔴', freezeDays: 14, minLevel: LEVELS.MANAGEMENT },
+  final: { label: 'إنذار أخير', emoji: '🔴', freezeDays: 60, suspend: true, minLevel: LEVELS.BOSS },
 };
 
 // ===== شروط الترقية (محدثة حسب النظام v3.0) =====
@@ -243,32 +192,32 @@ const POINTS = {
 // requiresConflictResolution: يشترط حل نزاعات
 
 const SUPPORT_PROMOTIONS = [
-   {
-     from: 'Helper', to: 'Support', months: 2, score: 65, points: 100, tickets: 0, rating: 3.5,
+    {
+      from: 'Helper', to: 'Support', months: 2, score: 65, rating: 3.5,
      maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
      minActiveDays: 15, minMessages: null, requiresSupervisorRating: true, requiresHelpedNewbee: false,
      approvers: 'مشرف واحد', approvals: 1, approvalLevel: LEVELS.SUPERVISOR,
    },
    {
-     from: 'Support', to: 'Support Expert', months: 3, score: 70, points: 250, tickets: 20, rating: 4.0,
+     from: 'Support', to: 'Support Expert', months: 3, score: 70, rating: 4.0,
      maxWarnings: 1, windowDays: 180, warnWindowDays: 180,
      minActiveDays: 20, minMessages: 100, requiresHelpedNewbee: false, fastResponseRequired: true,
      approvers: 'مشرف + مكتب الدعم', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
    },
    {
-     from: 'Support Expert', to: 'Support Analyst', months: 4, score: 75, points: 500, tickets: 35, rating: 4.2,
+     from: 'Support Expert', to: 'Support Analyst', months: 4, score: 75, rating: 4.2,
      maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
      minActiveDays: 20, minMessages: 150, requiresHelpedNewbee: true, fastResponseRequired: true,
      approvers: 'مكتب الدعم + Boss', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
    },
    {
-     from: 'Support Analyst', to: 'Supervisor Manager', months: 6, score: 80, points: 900, tickets: 50, rating: 4.5,
+     from: 'Support Analyst', to: 'Supervisor Manager', months: 6, score: 80, rating: 4.5,
      maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
      minActiveDays: 20, minMessages: null, stableMonths: 1, stableMinScore: 65, requiresHelpedNewbee: false, fastResponseRequired: true,
      approvers: 'مكتب الدعم + Boss', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
    },
    {
-     from: 'Supervisor Manager', to: 'Support Office', months: 8, score: 85, points: 1500, tickets: 50, rating: 4.7,
+     from: 'Supervisor Manager', to: 'Support Office', months: 8, score: 85, rating: 4.7,
      maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
      minActiveDays: 20, minMessages: null, stableMonths: 2, stableMinScore: 75, requiresHelpedNewbee: false, fastResponseRequired: true,
      approvers: 'Boss فقط', approvals: 1, approvalLevel: LEVELS.BOSS,
@@ -276,42 +225,30 @@ const SUPPORT_PROMOTIONS = [
  ];
 const MOD_PROMOTIONS = [
    {
-     from: 'Trial Moderator', to: 'Moderator', months: 1, score: 60, points: 80, actions: 15,
+     from: 'Trial Moderator', to: 'Moderator', months: 1, score: 60, actions: 15,
      maxWarnings: 0, windowDays: 30, warnWindowDays: 30, minActiveDays: 15, maxWrongDecisions: 0,
      requiresConflictResolution: false,
      approvers: 'Admin أو Head Of Moderators', approvals: 1, approvalLevel: LEVELS.SUPERVISOR,
    },
    {
-     from: 'Moderator', to: 'Senior Moderator', months: 3, score: 70, points: 200, actions: 30,
+     from: 'Moderator', to: 'Senior Moderator', months: 3, score: 70, actions: 30,
      maxWarnings: 1, windowDays: 90, warnWindowDays: 90, minActiveDays: 20, maxWrongDecisions: 2,
      requiresConflictResolution: true, fastResponseRequired: true,
      approvers: 'Admin + Head Of Moderators', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
    },
    {
-     from: 'Senior Moderator', to: 'Admin', months: 4, score: 75, points: 450, actions: 50,
+     from: 'Senior Moderator', to: 'Admin', months: 4, score: 75, actions: 50,
      maxWarnings: 0, windowDays: 120, warnWindowDays: 120, minActiveDays: 22, maxWrongDecisions: 1,
      requiresConflictResolution: true, fastResponseRequired: true,
      approvers: 'Head Of Moderators', approvals: 1, approvalLevel: LEVELS.MANAGEMENT,
    },
    {
-     from: 'Admin', to: 'Head Of Moderators', months: 6, score: 85, points: 900, actions: 60,
+     from: 'Admin', to: 'Head Of Moderators', months: 6, score: 85, actions: 60,
      maxWarnings: 0, windowDays: 180, warnWindowDays: 180, minActiveDays: 25, maxWrongDecisions: 0,
      requiresConflictResolution: true, fastResponseRequired: true, stableMonths: 1, stableMinScore: 75,
      approvers: 'Head الحالي + إدارة السيرفر', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
    },
  ];
-
-const COOLDOWNS = { 
-  // تبريد متدرج حسب الرتبة الجديدة
-  promoted_helper: 15,     // بعد ترقية لـ Support
-  promoted_support: 30,    // بعد ترقية لـ Expert
-  promoted_expert: 45,     // بعد ترقية لـ Analyst
-  promoted_analyst: 60,    // بعد ترقية لـ Supervisor
-  promoted_supervisor: 90, // بعد ترقية لـ Office/Head
-  rejected: 30,            // بعد رفض الترقية
-  warning: 14,             // بعد إنذار
-  suspended: 60,           // بعد إيقاف
-};
 
 /** ضوابط عامة تُستخدم في أكثر من خدمة (ترقيات، تقارير، تقييمات) */
 const PROBATION = {
@@ -336,5 +273,5 @@ module.exports = {
   CHANNEL_META, CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS,
   ACTIVITY_WEIGHTS, ACTIVITY_TYPE_NAMES, SPAM, ABSENCE, LEAVE_TYPES, LEAVE_RULES, LEAVE_GLOBAL, VACATION_ROLE_TIMING, WEEKDAYS_AR,
   RESIGNATION_REASONS, RESIGNATION_GLOBAL, MOD_ACTION_TYPES,
-  NOTE_TYPES, WARNING_TYPES, POINTS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, COOLDOWNS, PROBATION, SCORE_WEIGHTS,
+  NOTE_TYPES, WARNING_TYPES, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, PROBATION, SCORE_WEIGHTS,
 };

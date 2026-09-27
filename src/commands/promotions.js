@@ -2,9 +2,8 @@
 const forms = require('../ui/forms');
 const { homeRow } = require('../ui/navigation');
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { LEVELS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS, POINTS, COOLDOWNS } = require('../constants');
+const { LEVELS, SUPPORT_PROMOTIONS, MOD_PROMOTIONS } = require('../constants');
 const promo = require('../services/promotions');
-const points = require('../services/points');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, dm, log } = require('../utils');
@@ -80,11 +79,7 @@ module.exports = {
         const s = staffService.get(i.user.id);
         const e1 = embed('🎧 ترقيات فريق الدعم الفني', SUPPORT_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎯 ${p.points} نقطة • 🎫 ${p.tickets}+ تكت • ⭐ ${p.rating}+ • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n') + '\n\n**Support Office → Boss**: يدوي بقرار Boss', COLORS.info);
         const e2 = embed('🛡️ ترقيات فريق الإشراف', MOD_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎯 ${p.points} نقطة • 🛡️ ${p.actions}+ مخالفة • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n'), COLORS.info);
-        const team = s?.team;
-        const pos = Object.entries(POINTS).filter(([, d]) => (d.all ?? d[team || 'support'] ?? d.support ?? d.moderation) > 0).map(([, d]) => `• ${d.label}: **+${d.all ?? d[team] ?? d.support ?? d.moderation}**`).join('\n');
-        const neg = Object.entries(POINTS).filter(([, d]) => (d.all ?? d[team || 'support'] ?? d.support ?? d.moderation) < 0).map(([, d]) => `• ${d.label}: **${d.all ?? d[team] ?? d.support ?? d.moderation}**`).join('\n');
-        const e3 = embed('🎯 نقاط الترقية', `**إيجابية:**\n${pos}\n\n**خصومات:**\n${neg}\n\n**فترات التبريد:** بعد ترقية ${COOLDOWNS.promoted} يوم • بعد رفض ${COOLDOWNS.rejected} يوم • بعد إنذار ${COOLDOWNS.warning} يوم • بعد إيقاف ${COOLDOWNS.suspended} يوم\n\n> الترقية = مدة خدمة + أداء حقيقي + نقاط + موافقة الإدارة. لا توجد ترقية تلقائية.`, COLORS.primary);
-        return i.reply({ embeds: [e1, e2, e3], ephemeral: true });
+        return i.reply({ embeds: [e1, e2], ephemeral: true });
       },
     },
     {
@@ -97,8 +92,6 @@ module.exports = {
         const pending = promo.pendingRequest(i.user.id);
         const e = statusEmbed(s, ev);
         if (pending) e.addFields({ name: '📨 طلب معلّق', value: `#${pending.id} — بانتظار المراجعة` });
-        const hist = points.history(i.user.id, 8);
-        if (hist.length) e.addFields({ name: '🧾 آخر حركات النقاط', value: hist.map(h => `${h.points > 0 ? '🟢 +' : '🔴 '}${h.points} — ${h.reason}`).join('\n').slice(0, 1024) });
         return i.reply({ embeds: [e], components: [homeRow()], ephemeral: true });
       },
     },
@@ -160,29 +153,12 @@ module.exports = {
 
       promo.review(r.id, 'approved', i.user.id, null);
       audit.record({ action: 'promotion_approved', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, from: rule.from, to: rule.to, approvals: count, needed }, channelId: i.channelId });
-staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote', newEpoch: true });
-       points.resetForNewRank(r.user_id); // عصر نقاط جديد بدل صف سلبي مزيف
-       
-       // تحديد فترة التبريد حسب الرتبة الجديدة (نظام تبريد متدرج)
-       let cooldownType = 'promoted';
-       if (rule.to === 'Support') {
-         cooldownType = 'promoted_helper';
-       } else if (rule.to === 'Support Expert') {
-         cooldownType = 'promoted_support';
-       } else if (rule.to === 'Support Analyst') {
-         cooldownType = 'promoted_expert';
-       } else if (rule.to === 'Supervisor Manager') {
-         cooldownType = 'promoted_analyst';
-       } else if (rule.to === 'Support Office') {
-         cooldownType = 'promoted_supervisor';
-       }
-       
-       const until = points.setCooldown(r.user_id, cooldownType);
+      staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `ترقية معتمدة (طلب #${r.id} بموافقة ${count}/${needed})`, changeType: 'promote', newEpoch: true });
       const member = await i.guild.members.fetch(r.user_id).catch(() => null);
       const rolesOk = member ? await staffService.applyRankRoles(member, s.team, rule.to) : false;
 
       await i.update({ embeds: [requestEmbed(promo.getRequest(r.id), COLORS.success)], components: [] });
-      await dm(i.client, r.user_id, { embeds: [embed('🎉 مبروك الترقية!', `تمت ترقيتك إلى **${rule.to}**.\nفترة التبريد للترقية التالية حتى ${until}.`, COLORS.success)] });
+      await dm(i.client, r.user_id, { embeds: [embed('🎉 مبروك الترقية!', `تمت ترقيتك إلى **${rule.to}**`, COLORS.success)] });
       await sendToChannel(i.client, 'staff-updates', { embeds: [embed('🎉 ترقية جديدة', `<@${r.user_id}> — **${rule.from} → ${rule.to}**\nبقرار <@${i.user.id}>`, COLORS.success)] });
       return log(i.client, '📈 ترقية', `<@${r.user_id}>: ${rule.from} → ${rule.to} بواسطة <@${i.user.id}>${rolesOk ? '' : '\n⚠️ لم يتم تعديل الرتب تلقائياً — عدّلها يدوياً'}`, COLORS.success);
     },
@@ -196,10 +172,9 @@ staffService.setRank(r.user_id, s.team, rule.to, { actorId: i.user.id, reason: `
       if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب سبباً مخصصاً قبل الإرسال.', COLORS.danger);
       audit.record({ action: 'promotion_rejected', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, reason }, channelId: i.channelId });
       promo.review(r.id, 'rejected', i.user.id, reason);
-      const until = points.setCooldown(r.user_id, 'rejected');
       if (i.message) await i.message.edit({ embeds: [requestEmbed(promo.getRequest(r.id), COLORS.danger)], components: [] }).catch(() => {});
-      await replyEphemeral(i, `تم رفض الطلب #${r.id}. فترة تبريد حتى ${until}.`, COLORS.danger);
-      await dm(i.client, r.user_id, { embeds: [embed('❌ تم رفض طلب الترقية', `**السبب:** ${reason}\nيمكنك التقديم مجدداً بعد ${until}.`, COLORS.danger)] });
+      await replyEphemeral(i, `تم رفض الطلب #${r.id}.`, COLORS.danger);
+      await dm(i.client, r.user_id, { embeds: [embed('❌ تم رفض طلب الترقية', `**السبب:** ${reason}\nيمكنك التقديم مجدداً.`, COLORS.danger)] });
       return log(i.client, '📈 رفض ترقية', `<@${r.user_id}> — #${r.id} بواسطة <@${i.user.id}>\n${reason}`, COLORS.danger);
     },
   },

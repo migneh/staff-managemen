@@ -4,7 +4,6 @@ const { LEVELS, TEAMS, STATUS } = require('../constants');
 const settings = require('../services/settings');
 const staffService = require('../services/staff');
 const promotions = require('../services/promotions');
-const points = require('../services/points');
 const score = require('../services/score');
 const clock = require('../clock');
 const { embed, COLORS, replyEphemeral, arDigits, progressBar, tsRelative, tsDate } = require('../utils');
@@ -16,7 +15,7 @@ module.exports = {
       data: new SlashCommandBuilder().setName('promotion-progress').setDescription('عرض تفصيلي لتقدمك نحو الترقية القادمة')
         .addBooleanOption(o => o.setName('show-remaining').setDescription('عرض المتطلبات المتبقية فقط')),
       level: LEVELS.STAFF,
-async execute(i) {
+  async execute(i) {
          if (!settings.featureToggle('promotionProgress')) return replyEphemeral(i, '❌ هذا الأمر معطّل حالياً.', COLORS.danger);
          const showRemainingOnly = i.options.getBoolean('show-remaining') || false;
         const userId = i.user.id;
@@ -37,7 +36,6 @@ async execute(i) {
         const passedChecks = promoEval.checks.filter(c => c.pass).length;
         const totalChecks = promoEval.checks.length;
         const progressPercent = Math.round((passedChecks / totalChecks) * 100);
-        const pointsToNextRank = Math.max(0, rule.points - points.total(userId));
         const monthsInRank = clock.monthsSince(member.rank_since);
         const monthsToNextRank = Math.max(0, rule.months - monthsInRank);
         
@@ -66,15 +64,14 @@ async execute(i) {
           description: `المتطلبات المكتملة: **${passedChecks}/${totalChecks}** (${progressPercent}%)`,
           fields: [
             { name: '⏱️ الوقت في الرتبة', value: `${arDigits(monthsInRank.toFixed(1))} شهر / ${rule.months} شهر` },
-            { name: '💯 النقاط الحالية', value: `${arDigits(points.total(userId))} / ${arDigits(rule.points)} نقطة` },
             { name: '📈 التقييم (Score)', value: `${score.compute(member).score}/100` },
             { name: '📋 متطلبات الترقية', value: requirementDetails.slice(0, 1024) },
           ],
           color: promoEval.eligible ? COLORS.success : COLORS.warning,
-footer: kit.footerLine(
+  footer: kit.footerLine(
             promoEval.eligible 
               ? `✅ مؤهل للترقية! استخدم \`/request-promotion\` للتقديم` 
-              : `⏳ المتبقّي: ${monthsToNextRank > 0 ? `${arDigits(monthsToNextRank)} شهر` : '—'} | ${pointsToNextRank > 0 ? `${arDigits(pointsToNextRank)} نقطة` : '—'}${
+              : `⏳ المتبقّي: ${monthsToNextRank > 0 ? `${arDigits(monthsToNextRank)} شهر` : '—'}${
                   promoEval.checks.some(c => !c.pass && c.label.includes('التقييم')) ? ' | التقييم غير كافٍ' : ''
                 }`
           ),
@@ -103,16 +100,6 @@ footer: kit.footerLine(
         const timeEstimates = [];
         if (monthsToNextRank > 0) {
           timeEstimates.push(`⏰ الوقت المطلوب في الرتبة: ${arDigits(monthsToNextRank)} شهر`);
-        }
-        if (pointsToNextRank > 0) {
-          // Estimate based on recent points earning rate
-          const recentPoints = points.history(userId, 30, { allEpochs: true }); // Last 30 days, all epochs
-          const monthlyPoints = recentPoints.reduce((sum, p) => sum + p.points, 0);
-          const pointsPerDay = monthlyPoints / 30;
-          if (pointsPerDay > 0) {
-            const daysNeeded = Math.ceil(pointsToNextRank / pointsPerDay);
-            timeEstimates.push(`📈 الوقت المتوقع للنقاط: ${arDigits(Math.ceil(daysNeeded / 30))} شهر${daysNeeded % 30 !== 0 ? ` (≈${arDigits(daysNeeded % 30)} يوم)` : ''}`);
-          }
         }
         
         if (timeEstimates.length > 0) {
