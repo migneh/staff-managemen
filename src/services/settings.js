@@ -108,6 +108,39 @@ function setScoreWeights(team, values) {
   return scoreWeights(key);
 }
 
+// ===== ميزات قابلة للتبديل =====
+const FEATURE_TOGGLES_DEFAULTS = {
+  autoTicketPoints: true,        // نقاط تلقائية من التكتات
+  weeklyReports: true,           // تقارير أسبوعية تلقائية
+  monthlyReports: true,          // تقارير شهرية تلقائية
+  activityTracking: true,        // تتبع النشاط
+  punishmentSystem: true,        // نظام العقوبات (/warn, /note)
+  pointsHistoryCommands: true,   // أوامر تاريخ النقاط (/points-history, /points-overview)
+  detailedSystemStatus: true,    // حالة النظام التفصيلية
+  promotionProgress: true,       // أمر تقدم الترقية
+  myStatusCommand: true,         // أمر حالتي الحالية
+  auditExport: true,             // تصدير سجلات التدقيق
+  autoBackups: true,             // نسخ احتياطية تلقائية
+};
+
+function featureToggle(key) {
+  const toggles = load().featureToggles || {};
+  return toggles[key] !== undefined ? toggles[key] : FEATURE_TOGGLES_DEFAULTS[key];
+}
+
+function setFeatureToggle(key, value) {
+  const toggles = { ...(load().featureToggles || {}), [key]: value };
+  set('featureToggles', toggles);
+  return toggles[key];
+}
+
+function resetFeatureToggles() {
+  ensureTable();
+  getDb().prepare('DELETE FROM settings WHERE key = ?').run('featureToggles');
+  cache = null;
+}
+
+// ===== سياسات الطلبات (تُضبط من /setup وتُفضَّل على config.json) =====
 function resetPolicy(key) {
   ensureTable();
   getDb().prepare('DELETE FROM settings WHERE key = ?').run(`policy.${key}`);
@@ -198,4 +231,5 @@ module.exports = {
   roles, channels, activityChannels, roleId, channelId, ticketLogBotId, governanceRoleId, vacationRoleId, status,
   policy, setPolicy, resetPolicy, scoreWeights, setScoreWeights, leavePolicy, resignationPolicy, VACATION_ROLE_TIMING,
   CHANNEL_KEYS, OPTIONAL_CHANNEL_KEYS, CHANNEL_META,
+  featureToggle, setFeatureToggle, resetFeatureToggles,
 };

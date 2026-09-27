@@ -24,6 +24,9 @@ const modules = [
   require('./system'),
   require('./punishments'),
   require('./activity'),
+  require('./my-status'),
+  require('./promotion-progress'),
+  require('./config'),
 ];
 
 /**
@@ -182,12 +185,14 @@ const COMPONENT_ACCESS = {
    'me:perf': { level: LEVELS.STAFF, owner: 'self' },
    'me:record': { level: LEVELS.STAFF, owner: 'self' },
    'me:promo': { level: LEVELS.STAFF, owner: 'self' },
+   'my-status': { level: LEVELS.STAFF, owner: 'self' },
    'points:grantok': { level: LEVELS.MANAGEMENT, guarded: true },     // المنح اليدوي يتحقق من صاحب المنحة داخلياً
    'points:grantcancel': { level: LEVELS.MANAGEMENT, guarded: true },
    'points:contest': { level: LEVELS.STAFF, owner: 'self' },
    'points:contestmodal': { level: LEVELS.STAFF, owner: 'self' },
    'points:overview': { level: LEVELS.STAFF },
    'points:history': { level: LEVELS.STAFF },
+   'promotion-progress': { level: LEVELS.STAFF },
    'activity': { level: LEVELS.STAFF },
    'help:open': { level: LEVELS.STAFF },
    'help:section': { level: LEVELS.STAFF },

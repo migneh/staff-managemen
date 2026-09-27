@@ -22,11 +22,11 @@ const SECTIONS = [
 const GROUPS = {
   work: ['my-tasks', 'log-ticket', 'log-action', 'shoutout'],
   requests: ['request-leave', 'my-leaves', 'leave-balance', 'leave-calendar', 'extend-leave', 'cancel-leave', 'end-leave', 'resign', 'my-resignations', 'withdraw-resignation'],
-  promotion: ['promotion-status', 'request-promotion', 'promotion-info'],
-  perf: ['my-ratings', 'me', 'my-performance', 'my-record', 'points-history', 'appeal-warning'],
+  promotion: ['promotion-status', 'request-promotion', 'promotion-info', 'promotion-progress'],
+  perf: ['my-ratings', 'me', 'my-performance', 'my-record', 'points-history', 'appeal-warning', 'my-status'],
   system: ['setup', 'system-status', 'backup', 'backup-list', 'maintenance'],
 };
-const PERSONAL = new Set([...GROUPS.requests, ...GROUPS.perf, 'my-tasks', 'promotion-status', 'request-promotion']);
+const PERSONAL = new Set([...GROUPS.requests, ...GROUPS.perf, 'my-tasks', 'promotion-status', 'request-promotion', 'my-status']);
 // اختصارات يومية مباشرة؛ بقية الأوامر تمر بمعالج خيارات ومراجعة قبل التنفيذ.
 const QUICK_ACTIONS = {
   'my-ratings': 'تقييمات العملاء', me: 'لوحتي الشخصية', 'my-tasks': 'مهامي', faq: 'تصفح المعرفة', 'faq-list': 'قائمة التعليمات',
@@ -34,6 +34,8 @@ const QUICK_ACTIONS = {
   'request-leave': 'طلب إجازة', 'my-leaves': 'متابعة إجازاتي', 'leave-balance': 'رصيد إجازاتي',
   resign: 'بدء طلب استقالة', 'my-resignations': 'متابعة استقالاتي',
   'promotion-status': 'شروط ترقيتي', 'request-promotion': 'طلب ترقية',
+  'promotion-progress': 'تقدم الترقية',
+  'my-status': 'حالتي الحالية',
   'log-action': 'تسجيل إجراء إشرافي', 'log-ticket': 'تسجيل تكت يدوي',
   'review-leaves': 'مراجعة الإجازات', 'review-promotion': 'مراجعة الترقيات',
   'review-resignations': 'مراجعة الاستقالات',
