@@ -79,41 +79,67 @@ function evaluate(staff) {
   ok('الـ Score', sc.score >= rule.score, `${sc.score}`, `${rule.score}+`);
   ok('نقاط الترقية', pts >= rule.points, `${pts}`, `${rule.points}`);
 
-  if (staff.team === 'support') {
-    const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, SUM(rating IS NOT NULL) rated FROM ticket_metrics
-      WHERE claimer = ? AND date(closed_at) >= ?`).get(staff.user_id, since);
-    if (rule.tickets > 0) ok(`التكتات المغلقة (${windowLabel(windowDays)})`, t.c >= rule.tickets, `${t.c}`, `${rule.tickets}+`);
-    if (rule.rating) {
-      const ratedShare = t.c ? Math.round((t.rated / t.c) * 100) : 0;
-      const insufficient = t.c >= PROBATION.minTicketsForRating && ratedShare < MIN_RATED_SHARE;
-      const rating = t.r != null ? Math.round(t.r * 100) / 100 : null;
-      const pass = !insufficient && rating != null && rating >= rule.rating;
-      ok(`متوسط التقييم (${windowLabel(windowDays)})`, pass,
-        insufficient ? `${rating ?? '—'} على ${ratedShare}% من التكتات` : `${rating ?? '—'} (${ratedShare}% مُقيَّمة)`,
-        insufficient ? `يحتاج ${MIN_RATED_SHARE}% تقييمات على الأقل` : `${rule.rating}+`);
+if (staff.team === 'support') {
+     const t = db.prepare(`SELECT COUNT(*) c, AVG(rating) r, SUM(rating IS NOT NULL) rated, AVG(duration) avg_duration FROM ticket_metrics
+       WHERE claimer = ? AND date(closed_at) >= ?`).get(staff.user_id, since);
+     if (rule.tickets > 0) ok(`التكتات المغلقة (${windowLabel(windowDays)})`, t.c >= rule.tickets, `${t.c}`, `${rule.tickets}+`);
+     if (rule.rating) {
+       const ratedShare = t.c ? Math.round((t.rated / t.c) * 100) : 0;
+       const insufficient = t.c >= PROBATION.minTicketsForRating && ratedShare < MIN_RATED_SHARE;
+       const rating = t.r != null ? Math.round(t.r * 100) / 100 : null;
+       const pass = !insufficient && rating != null && rating >= rule.rating;
+       ok(`متوسط التقييم (${windowLabel(windowDays)})`, pass,
+         insufficient ? `${rating ?? '—'} على ${ratedShare}% من التكتات` : `${rating ?? '—'} (${ratedShare}% مُقيَّمة)`,
+         insufficient ? `يحتاج ${MIN_RATED_SHARE}% تقييمات على الأقل` : `${rule.rating}+`);
+     }
+     if (rule.minMessages) {
+       const msgs = db.prepare(`SELECT COUNT(*) c FROM activity_logs WHERE user_id = ? AND date(created_at) >= ?`).get(staff.user_id, since).c;
+       ok(`نشاط الشات (${windowLabel(windowDays)})`, msgs >= rule.minMessages, `${msgs}`, `${rule.minMessages}+`);
+     }
+     if (rule.requiresSupervisorRating) {
+       const age = staff.human_ratings_at ? Math.abs(clock.daysBetween(staff.human_ratings_at.slice(0, 10), today)) : null;
+       const stale = age != null && age > RATING_VALID_DAYS;
+       const rated = staff.supervisor_rating != null && !stale;
+       const actual = staff.supervisor_rating == null ? 'لم يُقيَّم بعد'
+         : stale ? `${staff.supervisor_rating}/25 — تقييم قديم (${age} يوم)`
+           : `${staff.supervisor_rating}/25${age != null ? ` (قبل ${age} يوم)` : ''}`;
+       ok('تقييم المشرف', rated, actual, `تقييم خلال ${RATING_VALID_DAYS} يوماً`);
+     }
+     if (rule.requiresHelpedNewbie) ok('مساعدة الأعضاء الجدد', helpedNewbie > 0, `${helpedNewbie} مرة`, 'مرة واحدة على الأقل');
+     // Check fast response time requirement
+     if (rule.fastResponseRequired) {
+       let maxResponseTime = 0;
+       if (rule.to === 'Support Expert') maxResponseTime = 15; // < 15 minutes
+       else if (rule.to === 'Support Analyst') maxResponseTime = 10; // < 10 minutes
+       else if (rule.to === 'Supervisor Manager') maxResponseTime = 5; // < 5 minutes
+       else if (rule.to === 'Support Office') maxResponseTime = 5; // < 5 minutes
+       
+       const avgDuration = t.avg_duration || 0;
+       const passed = avgDuration > 0 && avgDuration <= maxResponseTime;
+       ok(`متوسط سرعة الاستجابة (${windowLabel(windowDays)})`, passed,
+         `${Math.round(avgDuration)} دقيقة`, `${maxResponseTime}+ دقيقة`);
+     }
+   } else {
+    const a = db.prepare(`SELECT COUNT(*) c, AVG(CAST(duration AS REAL)) avg_duration FROM mod_actions
+       WHERE moderator_id = ? AND date(created_at) >= ?`).get(staff.user_id, since);
+ok(`المخالفات المعالجة (${windowLabel(windowDays)})`, a.c >= rule.actions, `${a.c}`, `${rule.actions}+`);
+if (rule.maxWrongDecisions != null) {
+       ok('القرارات الخاطئة', wrongDecisions <= rule.maxWrongDecisions, `${wrongDecisions}`, `أقصى ${rule.maxWrongDecisions}`);
+     }
+     if (rule.requireConflictResolution) ok('حل النزاعات', sc.raw?.actions >= 5, `${sc.raw?.actions ?? 0} إجراء`, 'سجل إجراءات كافٍ');
+     // Check fast response time requirement for moderation team
+     if (rule.fastResponseRequired) {
+       let maxResponseTime = 0;
+       if (rule.to === 'Senior Moderator') maxResponseTime = 10; // < 10 minutes
+       else if (rule.to === 'Admin') maxResponseTime = 5; // < 5 minutes
+       else if (rule.to === 'Head Of Moderators') maxResponseTime = 3; // < 3 minutes
+       
+const avgDuration = a.avg_duration || 0;
+        const passed = avgDuration > 0 && avgDuration <= maxResponseTime;
+        ok(`متوسط سرعة الاستجابة (${windowLabel(windowDays)})`, passed,
+          `${Math.round(avgDuration)} دقيقة`, `${maxResponseTime}+ دقيقة`);
+      }
     }
-    if (rule.minMessages) {
-      const msgs = db.prepare(`SELECT COUNT(*) c FROM activity_logs WHERE user_id = ? AND date(created_at) >= ?`).get(staff.user_id, since).c;
-      ok(`نشاط الشات (${windowLabel(windowDays)})`, msgs >= rule.minMessages, `${msgs}`, `${rule.minMessages}+`);
-    }
-    if (rule.requiresSupervisorRating) {
-      const age = staff.human_ratings_at ? Math.abs(clock.daysBetween(staff.human_ratings_at.slice(0, 10), today)) : null;
-      const stale = age != null && age > RATING_VALID_DAYS;
-      const rated = staff.supervisor_rating != null && !stale;
-      const actual = staff.supervisor_rating == null ? 'لم يُقيَّم بعد'
-        : stale ? `${staff.supervisor_rating}/25 — تقييم قديم (${age} يوم)`
-          : `${staff.supervisor_rating}/25${age != null ? ` (قبل ${age} يوم)` : ''}`;
-      ok('تقييم المشرف', rated, actual, `تقييم خلال ${RATING_VALID_DAYS} يوماً`);
-    }
-    if (rule.requiresHelpedNewbie) ok('مساعدة الأعضاء الجدد', helpedNewbie > 0, `${helpedNewbie} مرة`, 'مرة واحدة على الأقل');
-  } else {
-    const a = db.prepare(`SELECT COUNT(*) c FROM mod_actions WHERE moderator_id = ? AND date(created_at) >= ?`).get(staff.user_id, since).c;
-    ok(`المخالفات المعالجة (${windowLabel(windowDays)})`, a >= rule.actions, `${a}`, `${rule.actions}+`);
-    if (rule.maxWrongDecisions != null) {
-      ok('القرارات الخاطئة', wrongDecisions <= rule.maxWrongDecisions, `${wrongDecisions}`, `أقصى ${rule.maxWrongDecisions}`);
-    }
-    if (rule.requireConflictResolution) ok('حل النزاعات', sc.raw?.actions >= 5, `${sc.raw?.actions ?? 0} إجراء`, 'سجل إجراءات كافٍ');
-  }
 
   if (rule.minActiveDays) {
     ok(`التواجد (${windowLabel(windowDays)})`, sc.raw.activeDays >= rule.minActiveDays, `${sc.raw.activeDays} يوم`, `${rule.minActiveDays}+`);

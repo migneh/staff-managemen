@@ -243,63 +243,63 @@ const POINTS = {
 // requiresConflictResolution: يشترط حل نزاعات
 
 const SUPPORT_PROMOTIONS = [
-  {
-    from: 'Helper', to: 'Support', months: 2, score: 65, points: 100, tickets: 0, rating: 3.5,
-    maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
-    minActiveDays: 15, minMessages: null, requiresSupervisorRating: true, requiresHelpedNewbie: false,
-    approvers: 'مشرف واحد', approvals: 1, approvalLevel: LEVELS.SUPERVISOR,
-  },
-  {
-    from: 'Support', to: 'Support Expert', months: 3, score: 70, points: 250, tickets: 20, rating: 4.0,
-    maxWarnings: 1, windowDays: 180, warnWindowDays: 180,
-    minActiveDays: 20, minMessages: 100, requiresHelpedNewbie: false,
-    approvers: 'مشرف + Support Office', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
-  },
-  {
-    from: 'Support Expert', to: 'Support Analyst', months: 4, score: 75, points: 500, tickets: 35, rating: 4.2,
-    maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
-    minActiveDays: 20, minMessages: 150, requiresHelpedNewbie: true,
-    approvers: 'Support Office + Boss', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
-  },
-  {
-    from: 'Support Analyst', to: 'Supervisor Manager', months: 6, score: 80, points: 900, tickets: 50, rating: 4.5,
-    maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
-    minActiveDays: 20, minMessages: null, stableMonths: 3, stableMinScore: 70, requiresHelpedNewbie: false,
-    approvers: 'Support Office + Boss', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
-  },
-  {
-    from: 'Supervisor Manager', to: 'Support Office', months: 8, score: 85, points: 1500, tickets: 50, rating: 4.7,
-    maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
-    minActiveDays: 20, minMessages: null, stableMonths: 6, stableMinScore: 75, requiresHelpedNewbie: false,
-    approvers: 'Boss فقط', approvals: 1, approvalLevel: LEVELS.BOSS,
-  },
-];
+   {
+     from: 'Helper', to: 'Support', months: 2, score: 65, points: 100, tickets: 0, rating: 3.5,
+     maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
+     minActiveDays: 15, minMessages: null, requiresSupervisorRating: true, requiresHelpedNewbee: false,
+     approvers: 'مشرف واحد', approvals: 1, approvalLevel: LEVELS.SUPERVISOR,
+   },
+   {
+     from: 'Support', to: 'Support Expert', months: 3, score: 70, points: 250, tickets: 20, rating: 4.0,
+     maxWarnings: 1, windowDays: 180, warnWindowDays: 180,
+     minActiveDays: 20, minMessages: 100, requiresHelpedNewbee: false, fastResponseRequired: true,
+     approvers: 'مشرف + مكتب الدعم', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
+   },
+   {
+     from: 'Support Expert', to: 'Support Analyst', months: 4, score: 75, points: 500, tickets: 35, rating: 4.2,
+     maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
+     minActiveDays: 20, minMessages: 150, requiresHelpedNewbee: true, fastResponseRequired: true,
+     approvers: 'مكتب الدعم + Boss', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
+   },
+   {
+     from: 'Support Analyst', to: 'Supervisor Manager', months: 6, score: 80, points: 900, tickets: 50, rating: 4.5,
+     maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
+     minActiveDays: 20, minMessages: null, stableMonths: 1, stableMinScore: 65, requiresHelpedNewbee: false, fastResponseRequired: true,
+     approvers: 'مكتب الدعم + Boss', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
+   },
+   {
+     from: 'Supervisor Manager', to: 'Support Office', months: 8, score: 85, points: 1500, tickets: 50, rating: 4.7,
+     maxWarnings: 0, windowDays: 180, warnWindowDays: 180,
+     minActiveDays: 20, minMessages: null, stableMonths: 2, stableMinScore: 75, requiresHelpedNewbee: false, fastResponseRequired: true,
+     approvers: 'Boss فقط', approvals: 1, approvalLevel: LEVELS.BOSS,
+   },
+ ];
 const MOD_PROMOTIONS = [
-  {
-    from: 'Trial Moderator', to: 'Moderator', months: 1, score: 60, points: 80, actions: 15,
-    maxWarnings: 0, windowDays: 30, warnWindowDays: 30, minActiveDays: 15, maxWrongDecisions: 0,
-    requiresConflictResolution: false,
-    approvers: 'Admin أو Head Of Moderators', approvals: 1, approvalLevel: LEVELS.SUPERVISOR,
-  },
-  {
-    from: 'Moderator', to: 'Senior Moderator', months: 3, score: 70, points: 200, actions: 30,
-    maxWarnings: 1, windowDays: 90, warnWindowDays: 90, minActiveDays: 20, maxWrongDecisions: 2,
-    requiresConflictResolution: false,
-    approvers: 'Admin + Head Of Moderators', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
-  },
-  {
-    from: 'Senior Moderator', to: 'Admin', months: 4, score: 75, points: 450, actions: 50,
-    maxWarnings: 0, windowDays: 120, warnWindowDays: 120, minActiveDays: 22, maxWrongDecisions: 1,
-    requiresConflictResolution: true,
-    approvers: 'Head Of Moderators', approvals: 1, approvalLevel: LEVELS.MANAGEMENT,
-  },
-  {
-    from: 'Admin', to: 'Head Of Moderators', months: 6, score: 85, points: 900, actions: 60,
-    maxWarnings: 0, windowDays: 180, warnWindowDays: 180, minActiveDays: 25, maxWrongDecisions: 0,
-    requiresConflictResolution: true, stableMonths: 4, stableMinScore: 75,
-    approvers: 'Head الحالي + إدارة السيرفر', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
-  },
-];
+   {
+     from: 'Trial Moderator', to: 'Moderator', months: 1, score: 60, points: 80, actions: 15,
+     maxWarnings: 0, windowDays: 30, warnWindowDays: 30, minActiveDays: 15, maxWrongDecisions: 0,
+     requiresConflictResolution: false,
+     approvers: 'Admin أو Head Of Moderators', approvals: 1, approvalLevel: LEVELS.SUPERVISOR,
+   },
+   {
+     from: 'Moderator', to: 'Senior Moderator', months: 3, score: 70, points: 200, actions: 30,
+     maxWarnings: 1, windowDays: 90, warnWindowDays: 90, minActiveDays: 20, maxWrongDecisions: 2,
+     requiresConflictResolution: true, fastResponseRequired: true,
+     approvers: 'Admin + Head Of Moderators', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
+   },
+   {
+     from: 'Senior Moderator', to: 'Admin', months: 4, score: 75, points: 450, actions: 50,
+     maxWarnings: 0, windowDays: 120, warnWindowDays: 120, minActiveDays: 22, maxWrongDecisions: 1,
+     requiresConflictResolution: true, fastResponseRequired: true,
+     approvers: 'Head Of Moderators', approvals: 1, approvalLevel: LEVELS.MANAGEMENT,
+   },
+   {
+     from: 'Admin', to: 'Head Of Moderators', months: 6, score: 85, points: 900, actions: 60,
+     maxWarnings: 0, windowDays: 180, warnWindowDays: 180, minActiveDays: 25, maxWrongDecisions: 0,
+     requiresConflictResolution: true, fastResponseRequired: true, stableMonths: 1, stableMinScore: 75,
+     approvers: 'Head الحالي + إدارة السيرفر', approvals: 2, approvalLevel: LEVELS.MANAGEMENT,
+   },
+ ];
 
 const COOLDOWNS = { 
   // تبريد متدرج حسب الرتبة الجديدة
