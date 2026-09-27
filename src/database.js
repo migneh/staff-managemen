@@ -8,24 +8,25 @@ let db;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS staff_members (
-  user_id TEXT PRIMARY KEY,
-  username TEXT,
-  team TEXT NOT NULL,            -- support | moderation
-  rank TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  joined_at TEXT NOT NULL DEFAULT (datetime('now')),
-  rank_since TEXT NOT NULL DEFAULT (datetime('now')),
-  last_activity TEXT,
-  absence_alert_level INTEGER NOT NULL DEFAULT 0, -- 0 none, 1 dm sent, 2 staff alert sent
-  probation_exempt INTEGER NOT NULL DEFAULT 0,
-  supervisor_rating INTEGER,     -- تقييم المشرف (5-25)
-  team_interaction INTEGER,      -- التفاعل مع الفريق (5-25)
-  response_speed INTEGER,        -- سرعة الاستجابة للإشراف (5-25)
-  onboarding_ready INTEGER NOT NULL DEFAULT 0,
-  onboarding_approved_by TEXT,
-  onboarding_approved_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+   user_id TEXT PRIMARY KEY,
+   username TEXT,
+   team TEXT NOT NULL,            -- support | moderation
+   rank TEXT NOT NULL,
+   status TEXT NOT NULL DEFAULT 'active',
+   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+   rank_since TEXT NOT NULL DEFAULT (datetime('now')),
+   last_activity TEXT,
+   absence_alert_level INTEGER NOT NULL DEFAULT 0, -- 0 none, 1 dm sent, 2 staff alert sent
+   probation_exempt INTEGER NOT NULL DEFAULT 0,
+   supervisor_rating INTEGER,     -- تقييم المشرف (5-25)
+   team_interaction INTEGER,      -- التفاعل مع الفريق (5-25)
+   response_speed INTEGER,        -- سرعة الاستجابة للإشراف (5-25)
+   onboarding_ready INTEGER NOT NULL DEFAULT 0,
+   onboarding_approved_by TEXT,
+   onboarding_approved_at TEXT,
+   mentor_id TEXT,                -- معرف المرشد للتأهيل
+   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- تاريخ الرتب: الترقيات والتنزيلات والإزالة — كانت الرتب تُكتب فوق نفسها فلا يمكن
@@ -423,6 +424,23 @@ CREATE TABLE IF NOT EXISTS mission_progress (
 CREATE INDEX IF NOT EXISTS idx_mission_progress_mission ON mission_progress(mission_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_mission_progress_team ON mission_progress(team_id, status);
 
+-- قوالب طلبات الإجازة — لتسهيل الطلبات المتكررة
+CREATE TABLE IF NOT EXISTS leave_templates (
+   id TEXT PRIMARY KEY,           -- معرّف القالب مثل 'weekly_family', 'monthly_medical'
+   user_id TEXT NOT NULL,         -- صاحب القالب
+   name TEXT NOT NULL,            -- اسم القالب المعروض للمستخدم
+   description TEXT,              -- وصف القالب
+   leave_type TEXT NOT NULL,      -- نوع الإجازة
+   default_duration INTEGER,      -- المدة الافتراضية بالأيام
+   default_reason TEXT,          -- السبب الافتراضي
+   is_public INTEGER NOT NULL DEFAULT 0, -- 0 = خاص، 1 = عام للجميع
+   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+   FOREIGN KEY (user_id) REFERENCES staff_members(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_leave_templates_user ON leave_templates(user_id);
+CREATE INDEX IF NOT EXISTS idx_leave_templates_public ON leave_templates(is_public);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
@@ -488,7 +506,7 @@ function migrate(database) {
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_source_message ON ticket_metrics(source_message_id) WHERE source_message_id IS NOT NULL');
 
   // عمود الإيقاف المؤقت: يمنع بقاء العضو موقوفاً للأبد (كان لا يوجد مسار إلغاء إيقاف)
-  addTableColumns('staff_members', [['suspended_until', 'TEXT'], ['onboarding_ready', 'INTEGER NOT NULL DEFAULT 0'], ['onboarding_approved_by', 'TEXT'], ['onboarding_approved_at', 'TEXT']]);
+  addTableColumns('staff_members', [['suspended_until', 'TEXT'], ['onboarding_ready', 'INTEGER NOT NULL DEFAULT 0'], ['onboarding_approved_by', 'TEXT'], ['onboarding_approved_at', 'TEXT'], ['mentor_id', 'TEXT']]);
   addTableColumns('warnings', [['voided_at', 'TEXT'], ['voided_by', 'TEXT'], ['void_reason', 'TEXT']]);
   addTableColumns('ticket_metrics', [['duration_source', 'TEXT'], ['claimed_at', 'TEXT']]);
   // اقتراح تواريخ بديلة من المراجع: لا يغيّر الحالة، ويصل لصاحب الطلب كرسالة خاصة.
@@ -523,8 +541,21 @@ if (progressTableExists) {
   for (const [name, definition] of additions) {
     if (!columns.has(name)) database.exec(`ALTER TABLE mission_progress ADD COLUMN ${name} ${definition}`);
   }
-  database.exec('CREATE INDEX IF NOT EXISTS idx_mission_progress_mission ON mission_progress(mission_id, user_id)');
-  database.exec('CREATE INDEX IF NOT EXISTS idx_mission_progress_team ON mission_progress(team_id, status)');
+database.exec('CREATE INDEX IF NOT EXISTS idx_mission_progress_mission ON mission_progress(mission_id, user_id)');
+database.exec('CREATE INDEX IF NOT EXISTS idx_mission_progress_team ON mission_progress(team_id, status)');
+}
+
+// جدول قوالب الإجازات
+const leaveTemplatesTableExists = database.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='leave_templates'`).get();
+if (leaveTemplatesTableExists) {
+   const columns = new Set(database.prepare('PRAGMA table_info(leave_templates)').all().map(c => c.name));
+   const additions = [
+     ['created_at', "TEXT NOT NULL DEFAULT (datetime('now'))"],
+     ['updated_at', "TEXT NOT NULL DEFAULT (datetime('now'))"],
+   ];
+   for (const [name, definition] of additions) {
+     if (!columns.has(name)) database.exec(`ALTER TABLE leave_templates ADD COLUMN ${name} ${definition}`);
+   }
 }
   // تاريخ آخر تقييم بشري: يمنع الاعتماد على تقييم قديم لا يصف الحاضر
   addTableColumns('staff_members', [['human_ratings_at', 'TEXT']]);

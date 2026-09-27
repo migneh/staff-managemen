@@ -216,7 +216,7 @@ async function createMission(i) {
   // التحقق من الصلاحية لإنشاء مهمة لغيرك
   if (targetUser && targetUser.id !== i.user.id) {
     const member = staffService.get(i.user.id);
-    if (!member || ![LEVELS.MANAGEMENT, LEVELS.BOSS, LEVELS.GENERAL_MANAGEMENT, LEVELS.GENERAL_MANAGER].includes(member.rank)) {
+    if (!member || ![LEVELS.MANAGEMENT, LEVELS.BOSS].includes(member.level)) {
       return replyEphemeral(i, '❌ ليس لديك صلاحية لإنشاء مهمة لغيرك.', COLORS.danger);
     }
   }
@@ -267,7 +267,7 @@ async function createTeamMission(i) {
   
   // التحقق من الصلاحية
   const member = staffService.get(i.user.id);
-  if (!member || ![LEVELS.MANAGEMENT, LEVELS.BOSS, LEVELS.GENERAL_MANAGEMENT, LEVELS.GENERAL_MANAGER].includes(member.rank)) {
+  if (!member || ![LEVELS.MANAGEMENT, LEVELS.BOSS].includes(member.level)) {
     return replyEphemeral(i, '❌ ليس لديك صلاحية لإنشاء مهمة جماعية.', COLORS.danger);
   }
   
@@ -307,7 +307,22 @@ async function listTemplates(i) {
  */
 async function teamProgress(i) {
   const team = i.options.getString('team');
+  const db = getDb();
   
-  // Для простоты покажем заглушку
-  return replyEphemeral(i, `📊 تقدم المهام الجماعية للفريق ${team} سيكون متاحاً قريباً.`, COLORS.info);
+  const total = db.prepare('SELECT COUNT(*) c FROM mission_progress WHERE team_id = ?').get(team).c;
+  const completed = db.prepare('SELECT COUNT(*) c FROM mission_progress WHERE team_id = ? AND status = \'completed\'').get(team).c;
+  const pending = db.prepare('SELECT COUNT(*) c FROM mission_progress WHERE team_id = ? AND status = \'pending\'').get(team).c;
+  
+  const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+  
+  const e = embed(`📊 تقدم المهام الجماعية - ${team === 'support' ? 'الدعم الفني' : 'الإشراف'}`,
+    `${progressBar(completed, total, 10)} ${progress}%`, COLORS.info);
+  
+  e.addFields({
+    name: 'الإحصاءات',
+    value: `✅ مكتمل: ${arDigits(completed)}\n⏳ معلق: ${arDigits(pending)}\n📊 الإجمالي: ${arDigits(total)}`,
+    inline: true
+  });
+  
+  return i.reply({ embeds: [e], ephemeral: true });
 }

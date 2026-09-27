@@ -27,6 +27,8 @@ const modules = [
   require('./promotion-progress'),
   require('./config'),
   require('./staff-logs'),  // New: Staff logs system
+  require('./missions'),    // New: Missions/Tasks system enhancement
+  require('./onboarding'),  // New: Enhanced onboarding system
 ];
 
 /**

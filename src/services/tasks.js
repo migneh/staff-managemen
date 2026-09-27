@@ -6,14 +6,48 @@ function ensureOnboarding(userId) {
   const db = getDb();
   const existing = db.prepare("SELECT COUNT(*) c FROM staff_tasks WHERE user_id = ? AND task_type = 'onboarding'").get(userId).c;
   if (existing) return;
+  
+  // Get mentor info if assigned
+  const staffMember = db.prepare("SELECT mentor_id FROM staff_members WHERE user_id = ?").get(userId);
+  const mentorId = staffMember?.mentor_id;
+  
   const insert = db.prepare('INSERT INTO staff_tasks (user_id, title, description, task_type, due_date, assigned_by) VALUES (?, ?, ?, \'onboarding\', ?, ?)');
   const start = today();
   const seed = db.transaction(() => {
-    insert.run(userId, 'قراءة قاعدة المعرفة الأساسية', 'اقرأ القوانين والسياسات المهمة من /faq.', addDays(start, 2), 'system');
-    insert.run(userId, 'قراءة نظام الأداء والترقيات', 'راجع /promotion-info وافهم طريقة احتساب Score والنقاط.', addDays(start, 4), 'system');
-    insert.run(userId, 'تأكيد الجاهزية', 'أكمل الخطوتين ثم اضغط زر الإنهاء. بعدها يراجع المدير جاهزيتك قبل التحويل من التجربة إلى نشط.', addDays(start, 7), 'system');
+    insert.run(userId, 'قراءة قاعدة المعرفة الأساسية', 'اقرأ القوانين والسياسات المهمة من /faq.', addDays(start, 2), mentorId || null);
+    insert.run(userId, 'قراءة نظام الأداء والترقيات', 'راجع /promotion-info وافهم طريقة احتساب Score والنقاط.', addDays(start, 4), mentorId || null);
+    insert.run(userId, 'تأكيد الجاهزية واجتماع مع المرشد', 'أكمل الخطوتين ثم احجز اجتماعاً مع مرشدك لتقييم الجاهزية. بعد ذلك، يراجع المدير جاهزيتك قبل التحويل من التجربة إلى نشط.', addDays(start, 7), mentorId || null);
   });
   seed();
+}
+
+/**
+ * تعيين مرشد لموظف جديد
+ */
+function assignMentor(userId, mentorId) {
+  const db = getDb();
+  // Verify both users exist and are active staff
+  const user = db.prepare("SELECT * FROM staff_members WHERE user_id = ? AND status IN ('active', 'probation')").get(userId);
+  const mentor = db.prepare("SELECT * FROM staff_members WHERE user_id = ? AND status = 'active'").get(mentorId);
+  
+  if (!user) return { ok: false, error: 'الموظف غير موجود أو غير نشط' };
+  if (!mentor) return { ok: false, error: 'المرشد غير موجود أو غير نشط' };
+  if (user.team !== mentor.team) return { ok: false, error: 'يجب أن يكون المرشد من نفس الفريق' };
+  
+  db.prepare("UPDATE staff_members SET mentor_id = ?, updated_at = ? WHERE user_id = ?")
+    .run(mentorId, nowIso(), userId);
+    
+  return { ok: true, mentor: mentor };
+}
+
+/**
+ * إزالة مرشد من موظف
+ */
+function removeMentor(userId) {
+  const db = getDb();
+  db.prepare("UPDATE staff_members SET mentor_id = NULL, updated_at = ? WHERE user_id = ?")
+    .run(nowIso(), userId);
+  return { ok: true };
 }
 
 /**
@@ -388,5 +422,7 @@ module.exports = {
   createRecurring,
   processRecurringTasks,
   createTeamMission,
-  completeTeamMission
+  completeTeamMission,
+  assignMentor,
+  removeMentor
 };
