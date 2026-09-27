@@ -1,35 +1,27 @@
 'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
 const { LEVELS } = require('../constants');
 
-const modules = [
-  require('./setup'),
-  require('./forms'),
-  require('./wizard'),
-  require('./help'),
-  require('./faq'),
-  require('./logging'),
-  require('./appeals'),
-  require('./leaves'),
-  require('./resignations'),
-  require('./records'),
-  require('./recognition'),
-  require('./promotions'),
-  require('./reports'),
-  require('./ratings'),
-  require('./tasks'),
-  require('./audit'),
-  require('./backup'),
-  require('./governance'),
-  require('./system'),
-  require('./punishments'),
-  require('./activity'),
-  require('./my-status'),
-  require('./promotion-progress'),
-  require('./config'),
-  require('./staff-logs'),  // New: Staff logs system
-  require('./missions'),    // New: Missions/Tasks system enhancement
-  require('./onboarding'),  // New: Enhanced onboarding system
+/**
+ * نحافظ على الترتيب التاريخي للوحدات، ثم نضيف تلقائياً أي ملف أوامر جديد لم
+ * يُذكر هنا. بهذا لا تنكسر المراجع القديمة ولا يبقى أمر خارج سجل البوت.
+ */
+const preferredModuleFiles = [
+  'setup.js', 'forms.js', 'wizard.js', 'help.js', 'faq.js', 'logging.js',
+  'appeals.js', 'leaves.js', 'resignations.js', 'records.js', 'recognition.js',
+  'promotions.js', 'reports.js', 'ratings.js', 'tasks.js', 'audit.js',
+  'backup.js', 'governance.js', 'system.js', 'punishments.js', 'activity.js',
+  'my-status.js', 'promotion-progress.js', 'config.js', 'staff-logs.js',
+  'missions.js', 'onboarding.js',
 ];
+const discoveredModuleFiles = fs.readdirSync(__dirname)
+  .filter(file => file.endsWith('.js') && file !== 'index.js');
+const moduleFiles = [
+  ...preferredModuleFiles.filter(file => discoveredModuleFiles.includes(file)),
+  ...discoveredModuleFiles.filter(file => !preferredModuleFiles.includes(file)).sort(),
+];
+const modules = moduleFiles.map(file => require(path.join(__dirname, file)));
 
 /**
  * صلاحيات كل مكوّن (زر/قائمة/نموذج) تُعرَّف هنا مرة واحدة وتُفرض مركزياً في
