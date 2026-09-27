@@ -21,23 +21,22 @@ function getDraft(i, token) {
 }
 
 /** بطاقة التحذير: خطوات واضحة وتأكيد قبل الكتابة */
-function warningCard(draft, { pending = false, rowId = null, earned = null } = {}) {
-  const def = WARNING_TYPES[draft.type];
-  return kit.card({
-    title: pending ? `⚠️ تأكيد تسجيل: ${def.label}` : `✅ سُجّل إنذار: ${def.label}`,
-    description: pending
-      ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
-      : `بواسطة <@${draft.actorId}> — السجل **#${rowId}**.`,
-    fields: [
-      { name: '👤 العضو', value: `<@${draft.target}>`, inline: true },
-      { name: '📋 السبب', value: draft.reason, inline: false },
-      { name: '💠 النقاط', value: pending ? `متوقعة **${earned}**` : `**${earned}**`, inline: true },
-      pending ? { name: 'ℹ️ ملاحظة', value: 'تُخصم النقاط تلقائياً عند التأكيد، وتستمر بقية النقاط التلقائية.', inline: false } : null,
-    ],
-    color: pending ? COLORS.info : COLORS.warning,
-    footer: kit.footerLine(pending ? '⚠️ مراجعة قبل التسجيل' : `السجل #${rowId}`),
-  });
-}
+function warningCard(draft, { pending = false, rowId = null } = {}) {
+   const def = WARNING_TYPES[draft.type];
+   return kit.card({
+     title: pending ? `⚠️ تأكيد تسجيل: ${def.label}` : `✅ سُجّل إنذار: ${def.label}`,
+     description: pending
+       ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
+       : `بواسطة <@${draft.actorId}> — السجل **#${rowId}**.`,
+     fields: [
+       { name: '👤 العضو', value: `<@${draft.target}>`, inline: true },
+       { name: '📋 السبب', value: draft.reason, inline: false },
+       pending ? { name: 'ℹ️ ملاحظة', value: 'تُستأنف بقية النقاط التلقائية.', inline: false } : null,
+     ],
+     color: pending ? COLORS.info : COLORS.warning,
+     footer: kit.footerLine(pending ? '⚠️ مراجعة قبل التسجيل' : `السجل #${rowId}`),
+   });
+ }
 
 function warningButtons(token) {
   return new ActionRowBuilder().addComponents(
@@ -48,24 +47,23 @@ function warningButtons(token) {
 }
 
 /** بطاقة الملاحظة: خطوات واضحة وتأكيد قبل الكتابة */
-function noteCard(draft, { pending = false, rowId = null, earned = null } = {}) {
-  const def = NOTE_TYPES[draft.type];
-  return kit.card({
-    title: pending ? `📝 تأكيد تسجيل: ${def.label}` : `✅ سُجّلت ملاحظة: ${def.label}`,
-    description: pending
-      ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
-      : `بواسطة <@${draft.actorId}> — السجل **#${rowId}**.`,
-    fields: [
-      { name: '👤 العضو', value: `<@${draft.target}>`, inline: true },
-      { name: '📝 المحتوى', value: draft.content, inline: false },
-      { name: '💠 النقاط', value: pending ? `متوقعة **${earned}**` : `**${earned}**`, inline: true },
-      draft.is_secret ? { name: '🔒 سرية', value: 'نعم', inline: true } : null,
-      pending ? { name: 'ℹ️ ملاحظة', value: 'تُضاف النقاط تلقائياً عند التأكيد، وتستمر بقية النقاط التلقائية.', inline: false } : null,
-    ],
-    color: pending ? COLORS.info : (draft.type === 'positive' ? COLORS.success : COLORS.warning),
-    footer: kit.footerLine(pending ? '📝 مراجعة قبل التسجيل' : `السجل #${rowId}`),
-  });
-}
+function noteCard(draft, { pending = false, rowId = null } = {}) {
+   const def = NOTE_TYPES[draft.type];
+   return kit.card({
+     title: pending ? `📝 تأكيد تسجيل: ${def.label}` : `✅ سُجّلت ملاحظة: ${def.label}`,
+     description: pending
+       ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
+       : `بواسطة <@${draft.actorId}> — السجل **#${rowId}**.`,
+     fields: [
+       { name: '👤 العضو', value: `<@${draft.target}>`, inline: true },
+       { name: '📝 المحتوى', value: draft.content, inline: false },
+       draft.is_secret ? { name: '🔒 سرية', value: 'نعم', inline: true } : null,
+       pending ? { name: 'ℹ️ ملاحظة', value: 'تُستأنف بقية النقاط التلقائية.', inline: false } : null,
+     ],
+     color: pending ? COLORS.info : (draft.type === 'positive' ? COLORS.success : COLORS.warning),
+     footer: kit.footerLine(pending ? '📝 مراجعة قبل التسجيل' : `السجل #${rowId}`),
+   });
+ }
 
 function noteButtons(token) {
   return new ActionRowBuilder().addComponents(
@@ -76,41 +74,41 @@ function noteButtons(token) {
 }
 
 const modals = {
-  warning: ({ type = 'first' } = {}) => ({
-    id: `punish:warning:${type}`,
-    title: `⚠️ تسجيل إنذار: ${WARNING_TYPES[type].label}`,
-    fields: [
-      forms.user({ id: 'target', label: 'العضو الذي يخصه الإنذار', description: 'ابحث بالاسم واختر العضو الصحيح قبل الإرسال.' }),
-      forms.select({ id: 'preset', label: 'أسباب جاهزة', required: false, multiple: true,
-        options: [
-          { label: 'إساءة للأعضاء', value: 'إساءة للأعضاء' },
-          { label: 'تجاهل الأنظمة', value: 'تجاهل أنظمة السيرفر' },
-          { label: 'نقاش غير صحي', value: 'إثارة نقاش غير صحي' },
-          { label: 'مخالفة القوانين', value: 'مخالفة قوانين السيرفر' },
-          { label: 'سلوك غير لائق', value: 'سلوك غير لائق' },
-        ],
-        description: 'اختر ما ينطبق، أو اكتب السبب بنفسك في الحقل التالي.' }),
-      forms.field({ id: 'reason', label: 'تفاصيل السبب', required: false, style: 'paragraph', max: 500,
-        description: 'تُلحق بالأسباب المختارة وتظهر في سجل الإجراءات وإشعار الإدارة.' }),
-    ],
-    note: 'يظهر النص للعضو في الخاص ويُسجَّل مع فترة التبريد في سجل التدقيق.',
-  }),
-  note: ({ type = 'positive' } = {}) => ({
-    id: `punish:note:${type}`,
-    title: `📝 تسجيل ملاحظة: ${NOTE_TYPES[type].label}`,
-    fields: [
-      forms.user({ id: 'target', label: 'العضو الذي يخصه الملاحظة', description: 'ابحث بالاسم واختر العضو الصحيح قبل الإرسال.' }),
-      forms.field({ id: 'content', label: 'نص الملاحظة', required: true, style: 'paragraph', max: 500,
-        description: 'اكتب الملاحظة التي سيشاهدها العضو (إلا إذا كانت سرية).' }),
-      forms.select({ id: 'secret', label: 'نوع الملاحظة', required: true,
-        options: [
-          { label: 'عادية - يراه العضو', value: 'false' },
-          { label: 'سرية - للإدارة فقط', value: 'true' },
-        ],
-        description: 'اختر ما إذا كانت الملاحظة سرية (مرئية للإدارة فقط) أو عادية (مرئية للجميع).' }),
-    ],
-    note: 'الملاحظات الإيجابية تضيف نقاطاً، والسلبية تخصم نقاطاً.',
-  }),
+   warning: ({ type = 'first' } = {}) => ({
+     id: `punish:warning:${type}`,
+     title: `⚠️ تسجيل إنذار: ${WARNING_TYPES[type].label}`,
+     fields: [
+       forms.user({ id: 'target', label: 'العضو الذي يخصه الإنذار', description: 'ابحث بالاسم واختر العضو الصحيح قبل الإرسال.' }),
+       forms.select({ id: 'preset', label: 'أسباب جاهزة', required: false, multiple: true,
+         options: [
+           { label: 'إساءة للأعضاء', value: 'إساءة للأعضاء' },
+           { label: 'تجاهل الأنظمة', value: 'تجاهل أنظمة السيرفر' },
+           { label: 'نقاش غير صحي', value: 'إثارة نقاش غير صحي' },
+           { label: 'مخالفة القوانين', value: 'مخالفة قوانين السيرفر' },
+           { label: 'سلوك غير لائق', value: 'سلوك غير لائق' },
+         ],
+         description: 'اختر ما ينطبق، أو اكتب السبب بنفسك في الحقل التالي.' }),
+       forms.field({ id: 'reason', label: 'تفاصيل السبب', required: false, style: 'paragraph', max: 500,
+         description: 'تُلحق بالأسباب المختارة وتظهر في سجل الإجراءات وإشعار الإدارة.' }),
+     ],
+     note: 'يظهر النص للعضو في الخاص ويُسجَّل في سجل التدقيق.',
+   }),
+note: ({ type = 'positive' } = {}) => ({
+     id: `punish:note:${type}`,
+     title: `📝 تسجيل ملاحظة: ${NOTE_TYPES[type].label}`,
+     fields: [
+       forms.user({ id: 'target', label: 'العضو الذي يخصه الملاحظة', description: 'ابحث بالاسم واختر العضو الصحيح قبل الإرسال.' }),
+       forms.field({ id: 'content', label: 'نص الملاحظة', required: true, style: 'paragraph', max: 500,
+         description: 'اكتب الملاحظة التي سيشاهدها العضو (إلا إذا كانت سرية).' }),
+       forms.select({ id: 'secret', label: 'نوع الملاحظة', required: true,
+         options: [
+           { label: 'عادية - يراه العضو', value: 'false' },
+           { label: 'سرية - للإدارة فقط', value: 'true' },
+         ],
+         description: 'اختر ما إذا كانت الملاحظة سرية (مرئية للإدارة فقط) أو عادية (مرئية للجميع).' }),
+     ],
+     note: 'الملاحظات الإيجابية تُظهر تقدير الإدارة، والسلبية تُشير إلى الحاجة لتحسين الأداء.',
+   }),
 };
 
 module.exports = {
@@ -189,26 +187,22 @@ module.exports = {
       if (!ID_RE.test(target)) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. اختر العضو من قائمة النموذج.', COLORS.danger);
       if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب تفاصيل السبب قبل المتابعة.', COLORS.danger);
       
-      const def = WARNING_TYPES[draft.type];
+const def = WARNING_TYPES[draft.type];
       const db = getDb();
       const res = db.prepare('INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES (?, ?, ?, ?)')
         .run(draft.target, draft.type, reason, i.user.id);
-      
-      const earned = points.add(draft.target, draft.type === 'verbal' ? 'verbal_warning' : 'formal_warning', staffService.get(draft.target)?.team, { refType: 'warning', refId: res.lastInsertRowid, addedBy: i.user.id });
       
       audit.record({ action: 'staff_warning_issued', actorId: i.user.id, targetId: draft.target, details: { type: draft.type, reason, rowId: res.lastInsertRowid }, channelId: i.channelId });
       
       let extra = '';
       if (def.suspend) {
-        const until = points.setCooldown(draft.target, 'suspended', COOLDOWNS.suspended);
-        staffService.suspend(draft.target, until);
-        extra = `\n⛔ تم الإيقاف + تجميد الترقية حتى ${until}\n↩️ يُرفع الإيقاف تلقائياً في ${until} (أو يدوياً بـ \`/unsuspend\`)`;
+        staffService.suspend(draft.target, '60 days');
+        extra = `\n⛔ تم الإيقاف\n↩️ يُرفع الإيقاف تلقائياً بعد 60 يوماً (أو يدوياً بـ \`/unsuspend\`)`;
       } else if (def.freezeDays) { 
-        const until = points.setCooldown(draft.target, 'warning', def.freezeDays); 
-        extra = `\n🧊 تجميد الترقيةまで ${until}`; 
+        extra = `\n🧊 فترة تبريد للترقية: ${def.freezeDays} يوماً`; 
       }
       
-      const e = warningCard(draft, { rowId: res.lastInsertRowid, earned });
+      const e = warningCard(draft, { rowId: res.lastInsertRowid });
       await sendToChannel(i.client, 'staff-logs', { embeds: [e] });
       await i.update({ embeds: [e], components: [] });
       
@@ -222,13 +216,13 @@ module.exports = {
       } else {
         await dm(i.client, draft.target, { embeds: [kit.card({
           title: `${def.emoji} ${def.label}`,
-          description: `**السبب:** ${reason}\n**النقاط:** ${earned}${extra}\n\nبواسطة: <@${i.user.id}>`,
+          description: `**السبب:** ${reason}${extra}\n\nبواسطة: <@${i.user.id}>`,
           color: COLORS.warning,
           footer: kit.footerLine(`بواسطة <@${i.user.id}>`),
         })] }).catch(() => {});
       }
       
-      await replyEphemeral(i, `${def.emoji} تم إصدار **${def.label}** على <@${draft.target}> (${earned} نقطة).${extra}`, COLORS.warning);
+      await replyEphemeral(i, `${def.emoji} تم إصدار **${def.label}** على <@${draft.target}>.${extra}`, COLORS.warning);
       return log(i.client, `${def.emoji} ${def.label}`, `على <@${draft.target}> بواسطة <@${i.user.id}>\n${reason}${extra}`, COLORS.danger);
     },
 
@@ -263,25 +257,23 @@ module.exports = {
       const res = db.prepare('INSERT INTO staff_notes (user_id, note_type, content, is_secret, added_by) VALUES (?, ?, ?, ?, ?)')
         .run(draft.target, draft.type, content, isSecret ? 1 : 0, i.user.id);
       
-      const earned = points.add(draft.target, draft.type === 'positive' ? 'positive_note' : 'negative_note', staffService.get(draft.target)?.team, { refType: 'note', refId: res.lastInsertRowid, addedBy: i.user.id });
-      
       audit.record({ action: 'staff_note_added', actorId: i.user.id, targetId: draft.target, details: { type: draft.type, secret: !!isSecret, rowId: res.lastInsertRowid }, channelId: i.channelId });
       
-      const e = noteCard(draft, { rowId: res.lastInsertRowid, earned });
+      const e = noteCard(draft, { rowId: res.lastInsertRowid });
       await sendToChannel(i.client, 'staff-logs', { embeds: [e] });
       await i.update({ embeds: [e], components: [] });
       
       await dm(i.client, draft.target, { embeds: [kit.card({
         title: `${def.emoji} ${def.label} جديدة`,
-        description: `${content}\n\n**النقاط:** ${earned > 0 ? '+' : ''}${earned}`,
+        description: `${content}\n\nبواسطة: <@${i.user.id}>`,
         color: draft.type === 'positive' ? COLORS.success : COLORS.warning,
         footer: kit.footerLine(`بواسطة <@${i.user.id}>`),
       })] }).catch(() => {});
       
-      await replyEphemeral(i, `${def.emoji} تمت إضافة ${def.label} على <@${draft.target}> (${earned > 0 ? '+' : ''}${earned} نقطة)${isSecret ? ' 🔒' : ''}.`, COLORS.success);
+      await replyEphemeral(i, `${def.emoji} تمت إضافة ${def.label} على <@${draft.target}>${isSecret ? ' 🔒' : ''}.`, COLORS.success);
       if (!isSecret) await dm(i.client, draft.target, { embeds: [kit.card({
         title: `${def.emoji} ${def.label} جديدة`,
-        description: `${content}\n\n**النقاط:** ${earned > 0 ? '+' : ''}${earned}`,
+        description: `${content}\n\nبواسطة: <@${i.user.id}>`,
         color: draft.type === 'positive' ? COLORS.success : COLORS.warning,
         footer: kit.footerLine(`بواسطة <@${i.user.id}>`),
       })] }).catch(() => {});
@@ -301,7 +293,7 @@ module.exports = {
     'punish:notecancel': async (i, [token]) => {
       const draft = getDraft(i, token);
       if (draft && draft.actorId === i.user.id) drafts.delete(token);
-      return i.update({ embeds: [kit.notice('neutral', 'أُلغيت الملاحظة', 'لم تُسجَّل أي ملاحظة ولم تتغير النقاط.', { footer: kit.footerLine('📝 ملاحظة ملغاة') })], components: [] );
+      return i.update({ embeds: [kit.notice('neutral', 'أُلغيت الملاحظة', 'لم تُسجَّل أي ملاحظة.', { footer: kit.footerLine('📝 ملاحظة ملغاة') })], components: [] );
     },
   },
 };

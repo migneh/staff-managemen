@@ -4,7 +4,6 @@ const { LEVELS, TEAMS, STATUS } = require('../constants');
 const settings = require('../services/settings');
 const activity = require('../services/activity');
 const staffService = require('../services/staff');
-const points = require('../services/points');
 const promotions = require('../services/promotions');
 const score = require('../services/score');
 const clock = require('../clock');
@@ -14,8 +13,8 @@ const kit = require('../ui/kit');
 module.exports = {
   commands: [
     {
-      data: new SlashCommandBuilder().setName('my-status').setDescription('عرض حالتك الحالية: النشاط، النقاط، والترقية')
-        .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر')),
+data: new SlashCommandBuilder().setName('my-status').setDescription('عرض حالتك الحالية: النشاط والترقية')
+         .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر')),
       level: LEVELS.STAFF,
 async execute(i) {
          if (!settings.featureToggle('myStatusCommand')) return replyEphemeral(i, '❌ هذا الأمر معطّل حالياً.', COLORS.danger);
@@ -38,16 +37,15 @@ async execute(i) {
         } else if (lastActivityHours >= 72) {
           absenceStatus = 'تحذير initial (72+ ساعة)';
           absenceColor = COLORS.warning;
-        }
-        
-        // Get current points and rank
-        const currentPoints = points.total(userId);
-        const currentRank = member.rank;
-        const currentTeam = member.team;
-        
-        // Get promotion evaluation
-        const promoEval = promotions.evaluate(member);
-        const pointsToNextRank = promoEval.rule ? Math.max(0, promoEval.rule.points - currentPoints) : 0;
+}
+         
+         // Get current rank
+         const currentRank = member.rank;
+         const currentTeam = member.team;
+         
+         // Get promotion evaluation
+         const promoEval = promotions.evaluate(member);
+         const pointsToNextRank = 0;
         const monthsInRank = clock.monthsSince(member.rank_since);
         
         // Get current score
@@ -78,10 +76,10 @@ async execute(i) {
           const totalChecks = promoEval.checks.length;
           const progressPercent = Math.round((passedChecks / totalChecks) * 100);
           
-          e.addFields({
-            name: `🎯 الترقية القادمة: ${promoEval.rule.to}`,
-            value: `${progressBar(passedChecks, totalChecks, 10)} **${passedChecks}/${totalChecks}** شرط مكتمل\n${promoEval.eligible ? '✅ مؤهل للتقدم' : '❌ غير مؤهل actuellement'}\n${pointsToNextRank > 0 ? `💔 تحتاج ${arDigits(pointsToNextRank)} نقطة إضافية` : '✅ نقاط كافية للترقية'}`,
-          });
+e.addFields({
+             name: `🎯 الترقية القادمة: ${promoEval.rule.to}`,
+             value: `${progressBar(passedChecks, totalChecks, 10)} **${passedChecks}/${totalChecks}** شرط مكتمل\n${promoEval.eligible ? '✅ مؤهل للتقدم' : '❌ غير مؤهل actuellement'}\n${promoEval.eligible ? '✅ متوافق مع متطلبات الترقية' : '❌ تحتاج لتحسين الأداء للترقية'}`,
+           });
           
           if (detailed) {
             // Add detailed requirement breakdown
@@ -113,39 +111,26 @@ async execute(i) {
               ? `⛔ لديك تحذير absence منذ ${Math.floor(lastActivityHours - 96)} ساعات\n⚠️ سيتم تنبيه الفريق إذا لم تكن نشطاً خلال ${Math.max(0, 96 - lastActivityHours)} ساعات القادمة`
               : `⚠️ ستحصل على تحذير absence خلال ${Math.floor(hoursUntilWarning)} ساعات إذا لم تكن نشطاً\n🚨 سيحصل الفريق على تنبيه خلال ${Math.max(0, hoursUntilAlert)} ساعات إذا لم تكن نشطاً`,
           });
-        }
-        
-        // Add detailed section if requested
-        if (detailed) {
-          // Get recent points history
-          const recentPoints = points.history(userId, 10);
-          if (recentPoints.length > 0) {
-            const pointsHistory = recentPoints.map(p => {
-              const icon = p.points > 0 ? '🟢' : '🔴';
-              return `${icon} ${arDigits(Math.abs(p.points))} — ${p.reason || p.reason_key}`;
-            }).join('\n');
-            
-            e.addFields({
-              name: '📜 آخر 10 حركات نقاط',
-              value: pointsHistory.slice(0, 1024),
-            });
-          }
-          
-          // Get recent activity by channel type
-          e.addFields({
-            name: '📊 تفصيل النشاط (30 يوم)',
-            value: Object.entries(activityStats.byType).map(([type, count]) => {
-              const typeNames = { 
-                ticket: '🎫 تكتات', 
-                staff: '💬 إدارة', 
-                moderation: '🛡️ إشراف', 
-                general: '🌐 عام' 
-              };
-              const typeName = typeNames[type] || type;
-              return `${typeName}: ${arDigits(count)}`;
-            }).join(' • '),
-          });
-        }
+}
+         
+         // Add detailed section if requested
+         if (detailed) {
+           // Get recent activity by channel type
+           e.addFields({
+             name: '📊 تفصيل النشاط (30 يوم)',
+             value: Object.entries(activityStats.byChannel).map(([type, count]) => {
+               const typeName = {
+                 'support': '🎫 تكت',
+                 'moderation': '🛡️ إجراء',
+                 'chat': '💬 شات',
+                 'voice': '🔊 صوت',
+                 'screen': '🖥️ مشاركة شاشة',
+                 'game': '🎮 لعبة'
+               }[type] || type;
+               return `${typeName}: **${arDigits(count)}**`;
+             }).join('\n'),
+           });
+         }
         
         return i.reply({ embeds: [e], ephemeral: true });
       },

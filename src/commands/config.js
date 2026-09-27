@@ -92,17 +92,16 @@ punishmentSystem: 'نظام العقوبات',
 
 async function setFeature(i, feature, value) {
   const featureNames = {
-    autoTicketPoints: 'نقاط تلقائية من التكتات',
-    weeklyReports: 'تقارير أسبوعية تلقائية',
-    monthlyReports: 'تقارير شهرية تلقائية',
-    activityTracking: 'تتبع النشاط',
-    punishmentSystem: 'نظام العقوبات',
-    pointsHistoryCommands: 'أوامر تاريخ النقاط',
-    detailedSystemStatus: 'حالة النظام التفصيلية',
-    promotionProgress: 'أمر تقدم الترقية',
-    myStatusCommand: 'أمر حالتي الحالية',
-    auditExport: 'تصدر سجلات التدقيق',
-    autoBackups: 'نسخ احتياطية تلقائية',
+autoTicketPoints: 'نقاط تلقائية من التكتات',
+     weeklyReports: 'تقارير أسبوعية تلقائية',
+     monthlyReports: 'تقارير شهرية تلقائية',
+     activityTracking: 'تتبع النشاط',
+     punishmentSystem: 'نظام العقوبات',
+     detailedSystemStatus: 'حالة النظام التفصيلية',
+     promotionProgress: 'أمر تقدم الترقية',
+     myStatusCommand: 'أمر حالتي الحالية',
+     auditExport: 'تصدر سجلات التدقيق',
+     autoBackups: 'نسخ احتياطية تلقائية',
   };
   
   const name = featureNames[feature] || feature;

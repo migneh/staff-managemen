@@ -2,23 +2,22 @@
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { LEVELS, INACTIVE_STATUSES } = require('../constants');
 const { getDb } = require('../database');
-const points = require('../services/points');
 const staffService = require('../services/staff');
 const settings = require('../services/settings');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, dm, today } = require('../utils');
 
 function nominationEmbed(row, color = COLORS.warning) {
-  return embed(`🏆 ترشيح تقدير #${row.id}`, `من <@${row.nominator_id}> إلى <@${row.target_id}>\n\n**السبب:** ${row.reason}\n\nالحالة: **${row.status === 'pending' ? 'بانتظار اعتماد الإدارة' : row.status === 'approved' ? 'معتمد' : 'مرفوض'}**`, color)
-    .setFooter({ text: 'النقاط لا تُمنح إلا بعد اعتماد إداري.' });
-}
+   return embed(`🏆 ترشيح تقدير #${row.id}`, `من <@${row.nominator_id}> إلى <@${row.target_id}>\n\n**السبب:** ${row.reason}\n\nالحالة: **${row.status === 'pending' ? 'بانتظار اعتماد الإدارة' : row.status === 'approved' ? 'معتمد' : 'مرفوض'}**`)
+     .setFooter({ text: 'التقدير يُمنح بعد اعتماد إداري.' });
+ }
 
 function reviewRow(id) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`recognition:approve:${id}`).setLabel('اعتماد +5').setEmoji('✅').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`recognition:reject:${id}`).setLabel('رفض').setEmoji('❌').setStyle(ButtonStyle.Danger),
-  );
-}
+   return new ActionRowBuilder().addComponents(
+     new ButtonBuilder().setCustomId(`recognition:approve:${id}`).setLabel('اعتماد').setEmoji('✅').setStyle(ButtonStyle.Success),
+     new ButtonBuilder().setCustomId(`recognition:reject:${id}`).setLabel('رفض').setEmoji('❌').setStyle(ButtonStyle.Danger),
+   );
+ }
 
 function winsChannel() {
   return settings.channelId('staff-wins') ? 'staff-wins' : 'staff-updates';
@@ -68,22 +67,20 @@ module.exports = {
 };
 
 async function decide(i, id, status) {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM recognition_nominations WHERE id = ? AND status = 'pending'").get(Number(id));
-  if (!row) return replyEphemeral(i, '❌ الترشيح غير موجود أو تمت مراجعته.', COLORS.danger);
-  let awarded = 0;
-  if (status === 'approved') {
-    const target = staffService.get(row.target_id);
-    if (!target || INACTIVE_STATUSES.includes(target.status)) return replyEphemeral(i, '❌ العضو لم يعد نشطاً، لا يمكن اعتماد الترشيح.', COLORS.danger);
-    awarded = points.add(row.target_id, 'shoutout', target.team, { refType: 'recognition', refId: row.id, addedBy: i.user.id });
-  }
-  db.prepare('UPDATE recognition_nominations SET status = ?, reviewed_by = ?, reviewed_at = datetime(\'now\'), points_awarded = ? WHERE id = ?')
-    .run(status, i.user.id, awarded, row.id);
-  const updated = db.prepare('SELECT * FROM recognition_nominations WHERE id = ?').get(row.id);
-  audit.record({ action: `recognition_${status}`, actorId: i.user.id, targetId: row.target_id, details: { nominationId: row.id, points: awarded }, channelId: i.channelId });
-  await i.update({ embeds: [nominationEmbed(updated, status === 'approved' ? COLORS.success : COLORS.gray)], components: [] });
-  if (status === 'approved') await dm(i.client, row.target_id, { embeds: [embed('🏆 تقدير من زميل', `<@${row.nominator_id}> رشحك تقديراً لـ:\n\n${row.reason}\n\nمنحتك الإدارة **+${awarded} نقاط**.`, COLORS.success)] });
-  const channel = winsChannel();
-  await sendToChannel(i.client, channel, { embeds: [nominationEmbed(updated, status === 'approved' ? COLORS.success : COLORS.gray)] });
-  return null;
-}
+   const db = getDb();
+   const row = db.prepare("SELECT * FROM recognition_nominations WHERE id = ? AND status = 'pending'").get(Number(id));
+   if (!row) return replyEphemeral(i, '❌ الترشيح غير موجود أو تمت مراجعته.', COLORS.danger);
+   if (status === 'approved') {
+     const target = staffService.get(row.target_id);
+     if (!target || INACTIVE_STATUSES.includes(target.status)) return replyEphemeral(i, '❌ العضو لم يعد نشطاً، لا يمكن اعتماد الترشيح.', COLORS.danger);
+   }
+   db.prepare('UPDATE recognition_nominations SET status = ?, reviewed_by = ?, reviewed_at = datetime(\'now\') WHERE id = ?')
+     .run(status, i.user.id, row.id);
+   const updated = db.prepare('SELECT * FROM recognition_nominations WHERE id = ?').get(row.id);
+   audit.record({ action: `recognition_${status}`, actorId: i.user.id, targetId: row.target_id, details: { nominationId: row.id }, channelId: i.channelId });
+   await i.update({ embeds: [nominationEmbed(updated, status === 'approved' ? COLORS.success : COLORS.gray)], components: [] });
+   if (status === 'approved') await dm(i.client, row.target_id, { embeds: [embed('🏆 تقدير من زميل', `<@${row.nominator_id}> رشحك تقديراً لـ:\n\n${row.reason}\n\nمنحتك الإدارة تقديراً.` , COLORS.success)] });
+   const channel = winsChannel();
+   await sendToChannel(i.client, channel, { embeds: [nominationEmbed(updated, status === 'approved' ? COLORS.success : COLORS.gray)] });
+   return null;
+ }

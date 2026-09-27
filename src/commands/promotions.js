@@ -77,8 +77,8 @@ module.exports = {
       level: LEVELS.STAFF,
       async execute(i) {
         const s = staffService.get(i.user.id);
-        const e1 = embed('🎧 ترقيات فريق الدعم الفني', SUPPORT_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎯 ${p.points} نقطة • 🎫 ${p.tickets}+ تكت • ⭐ ${p.rating}+ • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n') + '\n\n**Support Office → Boss**: يدوي بقرار Boss', COLORS.info);
-        const e2 = embed('🛡️ ترقيات فريق الإشراف', MOD_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎯 ${p.points} نقطة • 🛡️ ${p.actions}+ مخالفة • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n'), COLORS.info);
+        const e1 = embed('🎧 ترقيات فريق الدعم الفني', SUPPORT_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🎫 ${p.tickets}+ تكت • ⭐ ${p.rating}+ • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n') + '\n\n**Support Office → Boss**: يدوي بقرار Boss', COLORS.info);
+        const e2 = embed('🛡️ ترقيات فريق الإشراف', MOD_PROMOTIONS.map(p => `**${p.from} → ${p.to}**\n⏳ ${p.months} شهر • 📊 Score ${p.score}+ • 🛡️ ${p.actions}+ مخالفة • ⚠️ أقصى ${p.maxWarnings} إنذار • 👥 ${p.approvers}`).join('\n\n'), COLORS.info);
         return i.reply({ embeds: [e1, e2], ephemeral: true });
       },
     },

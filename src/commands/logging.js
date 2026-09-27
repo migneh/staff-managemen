@@ -6,7 +6,6 @@ const { LEVELS, MOD_ACTION_TYPES } = require('../constants');
 const { getDb } = require('../database');
 const ticketLogs = require('../services/ticketLogs');
 const audit = require('../services/audit');
-const points = require('../services/points');
 const { COLORS, replyEphemeral, sendToChannel, dm, log } = require('../utils');
 const kit = require('../ui/kit');
 
@@ -40,25 +39,21 @@ function actionTypePicker() {
     ephemeral: true,
   };
 }
-function actionCard(draft, { pending = false, rowId = null, earned = null } = {}) {
-  const expected = points.valueFor('mod_action', 'moderation');
-  return kit.card({
-    title: pending ? `🛡️ تأكيد تسجيل: ${MOD_ACTION_TYPES[draft.type]}` : `✅ سُجّل إجراء: ${MOD_ACTION_TYPES[draft.type]}`,
-    description: pending
-      ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
-      : `بواسطة <@${draft.actorId}> — السجل **#${rowId}**.`,
-    fields: [
-      { name: '👤 العضو', value: `<@${draft.target}>`, inline: true },
-      { name: '⏱️ المدة', value: draft.duration || 'بلا مدة', inline: true },
-      { name: '💠 نقاط المشرف', value: pending ? `متوقعة **+${expected}**` : `**+${earned}**`, inline: true },
-      { name: '📋 السبب', value: draft.reason, inline: false },
-      draft.evidence ? { name: '🔗 الدليل', value: draft.evidence, inline: false } : null,
-      pending ? { name: 'ℹ️ ملاحظة', value: 'تُحتسب النقاط تلقائياً عند التأكيد، وتستمر بقية النقاط التلقائية.', inline: false } : null,
-    ],
-    color: pending ? COLORS.info : COLORS.warning,
-    footer: kit.footerLine(pending ? '🛡️ مراجعة قبل التسجيل' : `السجل #${rowId}`),
-  });
-}
+function actionCard(draft, { pending = false, rowId = null } = {}) {
+   const return kit.card({
+     title: pending ? `🛡️ تأكيد تسجيل: ${MOD_ACTION_TYPES[draft.type]}` : `✅ سُجّل إجراء: ${MOD_ACTION_TYPES[draft.type]}`,
+     description: pending
+       ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
+       : `بواسطة <@${draft.actorId}> — السجل **#${rowId}**.`,
+     fields: [
+       { name: '👤 العضو', value: `<@${draft.target}>`, inline: true },
+       { name: '📋 السبب', value: draft.reason, inline: false },
+       pending ? { name: 'ℹ️ ملاحظة', value: 'لا تُمنح نقاط لهذا الإجراء في النظام الحالي.', inline: false } : null,
+     ],
+     color: pending ? COLORS.info : COLORS.warning,
+     footer: kit.footerLine(pending ? '⚠️ مراجعة قبل التسجيل' : `السجل #${rowId}`),
+   });
+ }
 function actionButtons(token) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`modaction:confirm:${token}`).setLabel('تأكيد التسجيل').setEmoji('✅').setStyle(ButtonStyle.Success),
@@ -289,9 +284,9 @@ module.exports = {
       drafts.delete(token);
       const res = getDb().prepare(`INSERT INTO mod_actions (moderator_id, target_id, action_type, reason, duration, evidence) VALUES (?, ?, ?, ?, ?, ?)`)
         .run(draft.actorId, draft.target, draft.type, draft.reason, draft.duration, draft.evidence);
-      const earned = points.add(draft.actorId, 'mod_action', 'moderation', { refType: 'mod_action', refId: res.lastInsertRowid });
+      
       audit.record({ action: 'moderation_action_logged', actorId: draft.actorId, targetId: draft.target, details: { type: draft.type, reason: draft.reason, evidence: draft.evidence, duration: draft.duration, rowId: res.lastInsertRowid }, channelId: i.channelId });
-      const e = actionCard(draft, { rowId: res.lastInsertRowid, earned });
+      const e = actionCard(draft, { rowId: res.lastInsertRowid });
       await sendToChannel(i.client, 'mod-logs', { embeds: [e] });
       await i.update({ embeds: [e], components: [] });
       await dm(i.client, draft.target, { embeds: [kit.card({
@@ -307,10 +302,10 @@ module.exports = {
       return log(i.client, '🛡️ إجراء إشرافي', `<@${draft.target}> — ${MOD_ACTION_TYPES[draft.type]} بواسطة <@${draft.actorId}>`, COLORS.warning);
     },
 
-    'modaction:cancel': async (i, [token]) => {
+'modaction:cancel': async (i, [token]) => {
       const draft = getDraft(i, token);
       if (draft && draft.actorId === i.user.id) drafts.delete(token);
-      return i.update({ embeds: [kit.notice('neutral', 'أُلغي الإجراء', 'لم يُسجَّل أي إجراء ولم تُضف نقاط.', { footer: kit.footerLine('🛡️ إجراء ملغى') })], components: [] });
+      return i.update({ embeds: [kit.notice('neutral', 'أُلغي الإجراء', 'لم يُسجَّل أي إجراء.', { footer: kit.footerLine('🛡️ إجراء ملغى') })], components: [] );
     },
 
     'modaction:edit': async (i, [token]) => {

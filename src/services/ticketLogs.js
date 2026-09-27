@@ -3,7 +3,6 @@ const { getDb } = require('../database');
 const logger = require('../logger').log('ticket-logs');
 const settings = require('./settings');
 const staffService = require('./staff');
-const points = require('./points');
 
 const ID_RE = /^\d{15,22}$/;
 
@@ -149,19 +148,7 @@ async function enrichDuration(message, parsed) {
   }
   return parsed;
 }
-
-function addPoints(ticket, existing) {
-  const member = staffService.get(ticket.claimer);
-  const team = member?.team || 'support';
-  let earned = 0;
-  earned += points.add(ticket.claimer, 'ticket_closed', team, { refType: 'ticket', refId: ticket.ticketId, addedBy: ticket.loggedBy });
-  if (ticket.rating === 5) earned += points.add(ticket.claimer, 'ticket_rating_5', team, { refType: 'ticket', refId: ticket.ticketId, addedBy: ticket.loggedBy });
-  else if (ticket.rating === 4) earned += points.add(ticket.claimer, 'ticket_rating_4', team, { refType: 'ticket', refId: ticket.ticketId, addedBy: ticket.loggedBy });
-  else if (ticket.rating != null && ticket.rating <= 2) earned += points.add(ticket.claimer, 'ticket_rating_low', team, { refType: 'ticket', refId: ticket.ticketId, addedBy: ticket.loggedBy });
-  if (existing) earned += points.add(ticket.claimer, 'ticket_reopened', team, { refType: 'ticket', refId: ticket.ticketId, addedBy: ticket.loggedBy });
-  return earned;
-}
-
+ 
 /** تسجيل تكت يدوي أو مستخرج من سجل خارجي. */
 function recordTicket(input) {
   const ticket = {
@@ -182,14 +169,13 @@ function recordTicket(input) {
     return { duplicate: true, manualDuplicate: true, row: existing, earned: 0, reopened: !!existing.reopened };
   }
   const reopened = existing ? 1 : 0;
-  const result = db.prepare(`INSERT INTO ticket_metrics
-    (ticket_id, ticket_owner, claimer, closer, rating, duration, duration_source, claimed_at, logged_by, reopened, source, source_message_id, source_channel_id, source_url, ticket_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(ticket.ticketId, ticket.owner, ticket.claimer, ticket.closer || ticket.claimer, ticket.rating, ticket.duration,
-      ticket.durationSource || (ticket.duration == null ? null : 'reported'), ticket.claimedAt || null, ticket.loggedBy,
-      reopened, ticket.source, ticket.sourceMessageId || null, ticket.sourceChannelId || null, ticket.sourceUrl || null, ticket.ticketUrl || null);
-  const earned = addPoints(ticket, existing);
-  return { duplicate: false, row: { id: Number(result.lastInsertRowid), ...ticket, reopened }, earned, reopened: !!reopened, existing };
+const result = db.prepare(`INSERT INTO ticket_metrics
+     (ticket_id, ticket_owner, claimer, closer, rating, duration, duration_source, claimed_at, logged_by, reopened, source, source_message_id, source_channel_id, source_url, ticket_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+   .run(ticket.ticketId, ticket.owner, ticket.claimer, ticket.closer || ticket.claimer, ticket.rating, ticket.duration,
+     ticket.durationSource || (ticket.duration == null ? null : 'reported'), ticket.claimedAt || null, ticket.loggedBy,
+     reopened, ticket.source, ticket.sourceMessageId || null, ticket.sourceChannelId || null, ticket.sourceUrl || null, ticket.ticketUrl || null);
+   return { duplicate: false, row: { id: Number(result.lastInsertRowid), ...ticket, reopened }, reopened: !!reopened, existing };
 }
 
 module.exports = {

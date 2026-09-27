@@ -2,7 +2,6 @@
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { LEVELS, WARNING_TYPES } = require('../constants');
 const { getDb } = require('../database');
-const points = require('../services/points');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, dm } = require('../utils');
@@ -63,19 +62,13 @@ async function decide(i, id, status) {
   const row = db.prepare("SELECT a.*, w.warning_type, w.issued_by, w.reason warning_reason FROM warning_appeals a JOIN warnings w ON w.id = a.warning_id WHERE a.id = ? AND a.status = 'pending'").get(Number(id));
   if (!row) return replyEphemeral(i, '❌ الاستئناف غير موجود أو تمت مراجعته.', COLORS.danger);
   let reversed = 0;
-  if (status === 'approved') {
-    const target = staffService.get(row.user_id);
-    if (!target) return replyEphemeral(i, '❌ العضو غير مسجل حالياً.', COLORS.danger);
-    db.prepare('UPDATE warnings SET voided_at = datetime(\'now\'), voided_by = ?, void_reason = ? WHERE id = ?').run(i.user.id, `قبول الاستئناف #${row.id}`, row.warning_id);
-    const ledger = db.prepare("SELECT * FROM promotion_points WHERE ref_type = 'warning' AND ref_id = ? ORDER BY id DESC LIMIT 1").get(String(row.warning_id));
-    if (ledger?.points) {
-      reversed = Math.abs(ledger.points);
-      points.add(row.user_id, 'warning_reversal', target.team, {
-        override: -ledger.points, refType: 'warning_reversal', refId: row.warning_id, addedBy: i.user.id,
-        reason: `إلغاء نقاط الإنذار عبر الاستئناف #${row.id}`,
-      });
-    }
-  }
+if (status === 'approved') {
+     const target = staffService.get(row.user_id);
+     if (!target) return replyEphemeral(i, '❌ العضو غير مسجل حالياً.', COLORS.danger);
+     db.prepare('UPDATE warnings SET voided_at = datetime(\'now\'), voided_by = ?, void_reason = ? WHERE id = ?').run(i.user.id, `قبول الاستئناف #${row.id}`, row.warning_id);
+     const ledger = db.prepare("SELECT * FROM promotion_points WHERE ref_type = 'warning' AND ref_id = ? ORDER BY id DESC LIMIT 1").get(String(row.warning_id));
+     // Points system removed - points reversal disabled
+   }
   db.prepare('UPDATE warning_appeals SET status = ?, reviewed_by = ?, review_reason = ?, reviewed_at = datetime(\'now\') WHERE id = ?')
     .run(status, i.user.id, status === 'approved' ? 'تم قبول الاستئناف وإلغاء الإنذار' : 'تم رفض الاستئناف', row.id);
   const updated = db.prepare('SELECT a.*, w.warning_type FROM warning_appeals a JOIN warnings w ON w.id = a.warning_id WHERE a.id = ?').get(row.id);
