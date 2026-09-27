@@ -26,6 +26,7 @@ const modules = [
   require('./my-status'),
   require('./promotion-progress'),
   require('./config'),
+  require('./staff-logs'),  // New: Staff logs system
 ];
 
 /**
