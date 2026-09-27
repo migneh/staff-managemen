@@ -15,7 +15,6 @@ const modules = [
   require('./recognition'),
   require('./promotions'),
   require('./reports'),
-  require('./points'),
   require('./ratings'),
   require('./tasks'),
   require('./audit'),
