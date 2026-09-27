@@ -7,7 +7,7 @@ const settings = require('../services/settings');
 const clock = require('../clock');
 const retention = require('../services/retention');
 const { getDb } = require('../database');
-const { embed, COLORS, divider, arDigits } = require('../utils');
+const { embed, COLORS, divider, arDigits, replyEphemeral } = require('../utils');
 const kit = require('../ui/kit');
 
 const JOB_LABELS = {

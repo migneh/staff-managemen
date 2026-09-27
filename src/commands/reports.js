@@ -42,7 +42,11 @@ function leaderboardEmbed(rows, title, days = LEADERBOARD_WINDOW_DAYS) {
   if (!rows.length && !unranked.length) return embed(title, 'لا يوجد إداريون مؤهلون للترتيب.', COLORS.gray);
   const medals = ['🥇', '🥈', '🥉'];
   const body = rows.length
-    ? rows.slice(0, 20).map((r, idx) => `${medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`}').join('\n')
+    ? rows.slice(0, 20).map((r, idx) => {
+      const position = medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``;
+      const work = r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`;
+      return `${position} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${work}`;
+    }).join('\n')
     : '_لا أحد بلغ الحد الأدنى للمشاركة._';
   const footer = `النافذة: آخر ${days} يوم • بلا حد أدنى للمشاركة: ${unranked.length} • Boss والمجازون مستبعدون`;
   return embed(title, body, COLORS.primary)

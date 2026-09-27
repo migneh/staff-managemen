@@ -40,7 +40,7 @@ function actionTypePicker() {
   };
 }
 function actionCard(draft, { pending = false, rowId = null } = {}) {
-   const return kit.card({
+   return kit.card({
      title: pending ? `🛡️ تأكيد تسجيل: ${MOD_ACTION_TYPES[draft.type]}` : `✅ سُجّل إجراء: ${MOD_ACTION_TYPES[draft.type]}`,
      description: pending
        ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
@@ -305,7 +305,7 @@ module.exports = {
 'modaction:cancel': async (i, [token]) => {
       const draft = getDraft(i, token);
       if (draft && draft.actorId === i.user.id) drafts.delete(token);
-      return i.update({ embeds: [kit.notice('neutral', 'أُلغي الإجراء', 'لم يُسجَّل أي إجراء.', { footer: kit.footerLine('🛡️ إجراء ملغى') })], components: [] );
+      return i.update({ embeds: [kit.notice('neutral', 'أُلغي الإجراء', 'لم يُسجَّل أي إجراء.', { footer: kit.footerLine('🛡️ إجراء ملغى') })], components: [] });
     },
 
     'modaction:edit': async (i, [token]) => {

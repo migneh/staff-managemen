@@ -4,6 +4,7 @@ const { LEVELS, INACTIVE_STATUSES } = require('../constants');
 const { getDb } = require('../database');
 const staffService = require('../services/staff');
 const settings = require('../services/settings');
+const points = require('../services/points');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, sendToChannel, dm, today } = require('../utils');
 
@@ -74,6 +75,7 @@ async function decide(i, id, status) {
      const target = staffService.get(row.target_id);
      if (!target || INACTIVE_STATUSES.includes(target.status)) return replyEphemeral(i, '❌ العضو لم يعد نشطاً، لا يمكن اعتماد الترشيح.', COLORS.danger);
    }
+   if (status === 'approved') points.add(row.target_id, 'recognition', staffService.get(row.target_id)?.team || 'support', { points: 5, refType: 'recognition', refId: row.id, addedBy: i.user.id });
    db.prepare('UPDATE recognition_nominations SET status = ?, reviewed_by = ?, reviewed_at = datetime(\'now\') WHERE id = ?')
      .run(status, i.user.id, row.id);
    const updated = db.prepare('SELECT * FROM recognition_nominations WHERE id = ?').get(row.id);

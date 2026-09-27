@@ -738,7 +738,7 @@ module.exports = {
            sub.setName('use')
              .setDescription('استخدام قالب إجازة لإنشاء طلب جديد')
              .addStringOption(o => o.setName('id').setDescription('معرف القالب').setRequired(true))
-             .addStringOption(o => o.setName('reason').setDescription('السبب (يOverride الافتراضي)')
+             .addStringOption(o => o.setName('reason').setDescription('السبب (يOverride الافتراضي)'))
              .addIntegerOption(o => o.setName('duration').setDescription('المدة بالأيام (يOverride الافتراضي)'))
          )
        },

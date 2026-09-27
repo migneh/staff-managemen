@@ -9,8 +9,8 @@ const kit = require('../ui/kit');
 module.exports = {
   commands: [
     {
-      data: new SlashCommandBuilder().setName('activity').set_description('إحصائيات نشاطك الشخصي')
-        .addIntegerOption(o => o.setName('days').set_description('عدد الأيام للتقرير (الافتراضي: 30)').set_min_value(1).set_max_value(365)),
+      data: new SlashCommandBuilder().setName('activity').setDescription('إحصائيات نشاطك الشخصي')
+        .addIntegerOption(o => o.setName('days').setDescription('عدد الأيام للتقرير (الافتراضي: 30)').setMinValue(1).setMaxValue(365)),
       level: LEVELS.STAFF,
       async execute(i) {
         const days = i.options.getInteger('days') || 30;

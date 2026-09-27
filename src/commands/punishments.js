@@ -293,7 +293,7 @@ const def = WARNING_TYPES[draft.type];
     'punish:notecancel': async (i, [token]) => {
       const draft = getDraft(i, token);
       if (draft && draft.actorId === i.user.id) drafts.delete(token);
-      return i.update({ embeds: [kit.notice('neutral', 'أُلغيت الملاحظة', 'لم تُسجَّل أي ملاحظة.', { footer: kit.footerLine('📝 ملاحظة ملغاة') })], components: [] );
+      return i.update({ embeds: [kit.notice('neutral', 'أُلغيت الملاحظة', 'لم تُسجَّل أي ملاحظة.', { footer: kit.footerLine('📝 ملاحظة ملغاة') })], components: [] });
     },
   },
 };

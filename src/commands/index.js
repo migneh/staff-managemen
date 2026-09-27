@@ -45,6 +45,13 @@ const modules = [
  * guarded        : true يعني أن المعالج يفحص الصلاحية داخلياً ويجب تركه (توثيق)
  */
 const COMPONENT_ACCESS = {
+  'templates:list': { level: LEVELS.STAFF, owner: 'self' },
+  'templates:create': { level: LEVELS.STAFF, owner: 'self' },
+  'templates:use': { level: LEVELS.STAFF, owner: 'self' },
+  'staff-logs:page': { level: LEVELS.STAFF },
+  'mission:complete': { level: LEVELS.STAFF, owner: 'self' },
+  'mission:cancel': { level: LEVELS.MANAGEMENT, guarded: true },
+  'onboarding:complete': { level: LEVELS.STAFF, owner: 'self' },
   'wizard:submit': { level: LEVELS.STAFF, guarded: true },
   'wizard:reopen': { level: LEVELS.STAFF, guarded: true },
   'wizard:edit': { level: LEVELS.STAFF, guarded: true },
@@ -187,9 +194,6 @@ const COMPONENT_ACCESS = {
    'me:perf': { level: LEVELS.STAFF, owner: 'self' },
    'me:record': { level: LEVELS.STAFF, owner: 'self' },
    'me:promo': { level: LEVELS.STAFF, owner: 'self' },
-   'my-status': { level: LEVELS.STAFF, owner: 'self' },
-   'promotion-progress': { level: LEVELS.STAFF },
-   'activity': { level: LEVELS.STAFF },
    'help:open': { level: LEVELS.STAFF },
    'help:section': { level: LEVELS.STAFF },
    'help:page': { level: LEVELS.STAFF },
