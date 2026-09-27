@@ -101,7 +101,7 @@ async function importExternalTicketLog(msg) {
   const durationText = parsed.duration == null ? 'غير مذكورة'
     : `${parsed.duration} دقيقة${parsed.durationSource === 'computed' ? ' (محسوبة من سجل القناة)' : ''}`;
   const e = embed(`🎫 تم تسجيل التكت تلقائياً ${result.reopened ? '♻️' : '✅'}`,
-    `تمت قراءة سجل **${parsed.ticketId}** من البوت الخارجي بدون تدخل يدوي.\n\n👤 المستلم: <@${parsed.claimer}>\n🔒 الذي أغلقه: <@${parsed.closer}>\n⭐ التقييم: ${parsed.rating ?? '—'}\n⏱️ مدة الحل: ${durationText}\n🎯 النقاط: **${result.earned >= 0 ? '+' : ''}${result.earned}**\n🔗 [فتح سجل التكت](${parsed.ticketUrl || parsed.sourceUrl || msg.url})`,
+    `تمت قراءة سجل **${parsed.ticketId}** من البوت الخارجي بدون تدخل يدوي.\n\n👤 المستلم: <@${parsed.claimer}>\n🔒 الذي أغلقه: <@${parsed.closer}>\n⭐ التقييم: ${parsed.rating ?? '—'}\n⏱️ مدة الحل: ${durationText}\n🔗 [فتح سجل التكت](${parsed.ticketUrl || parsed.sourceUrl || msg.url})`,
     result.reopened ? COLORS.warning : COLORS.success).setFooter({ text: `السجل #${result.row.id} • المصدر: ${msg.author.tag || msg.author.id}` });
   await sendToChannel(client, 'ticket-logs', { embeds: [e] });
   return true;
