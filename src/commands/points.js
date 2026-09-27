@@ -178,67 +178,7 @@ module.exports = {
         drafts.set(token, draft);
         return i.reply({ embeds: [grantCard(draft)], components: [grantRow(token)], ephemeral: true });
       },
-    },
-    {
-      data: new SlashCommandBuilder().setName('points-overview').setDescription('نظرة سريعة على النقاط: رصيدك، ترتيبك، وآخر الحركات')
-      .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر (افتراضياً: مختصر)')),
-      level: LEVELS.STAFF,
-      async execute(i) {
-        if (!settings.featureToggle('pointsHistoryCommands')) return replyEphemeral(i, '❌ أوامر تاريخ النقاط معطّلة حالياً.', COLORS.danger);
-        const detailed = i.options.getBoolean('detailed') || false;
-        const rows = staffService.all().map(m => ({ ...m, total: points.total(m.user_id) }));
-        const mine = rows.find(r => r.user_id === i.user.id);
-        const rank = mine ? rows.slice().sort((a, b) => b.total - a.total).findIndex(r => r.user_id === i.user.id) + 1 : null;
-        const recent = points.history(i.user.id, detailed ? 20 : 5);
-        const e = kit.card({
-          title: '🎯 نقاطك',
-          description: detailed 
-            ? '_يعرض السجل الكامل للنقاط مع إمكانية التصفية عبر `/points-history`._'
-            : '_تُحتسب نقاط رتبتك الحالية فقط، ويبقى السجل الكامل متاحاً في `/points-history`._',
-          fields: [
-            { name: '💯 الرصيد', value: `${arDigits(mine?.total ?? 0)} نقطة`, inline: true },
-            rank ? { name: '🏅 الترتيب', value: `${arDigits(rank)} من ${arDigits(rows.length)}`, inline: true } : null,
-            recent.length ? { name: '🧾 آخر الحركات', value: kit.clip(recent.map(r => `• ${sign(r.points)} — ${r.reason || r.reason_key}${r.counts ? '' : ' _(رتبة سابقة)_'}`).join('\n'), 1024), inline: false } : null,
-            { name: '⬆️ كيف تزيد نقاطك؟', value: 'التكتات المغلقة والتقييمات العالية والإجراءات المسجّلة تُضاف تلقائياً. الإدارة يمكنها أيضاً منح نقاط يدوية بسبب موثّق.', inline: false },
-          ],
-          color: COLORS.info,
-          footer: kit.footerLine('🎯 ملخّص شخصي'),
-        });
-        return i.reply({ embeds: [e], ephemeral: true });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('points-history').setDescription('سجل النقاط المفصل مع خيارات التصفية')
-      .addStringOption(o => o.setName('category').setDescription('تصفية حسب الفئة').addChoices(
-        { name: 'جميع الفئات', value: 'all' },
-        { name: '🎫 تكتات', value: 'ticket' },
-        { name: '🛡️ مخالفات وإشراف', value: 'moderation' },
-        { name: '📈 مكافآت أسبوعية/شهرية', value: 'bonus' },
-        { name: '🤝 تعاون ومساعدة', value: 'help' },
-        { name: '📝 ملاحظات', value: 'notes' },
-        { name: '⚠️ إنذارات', value: 'warnings' },
-        { name: '🚫 خصومات', value: 'penalties' },
-        { name: '🌟 منح يدوية', value: 'manual' }
-      ))
-      .addIntegerOption(o => o.setName('days').setDescription('عدد الأيام للأرجاع (الافتراضي: 30)').setMinValue(1).setMaxValue(365))
-      .addBooleanOption(o => o.setName('only-current-epoch').setDescription('عرض نقاط الرتبة الحالية فقط (افتراضياً: نعم)'))
-      .addBooleanOption(o => o.setName('show-epochs').setDescription('عرض عصر النقاط لكل حركة')),
-      level: LEVELS.STAFF,
-      async execute(i) {
-        if (!settings.featureToggle('pointsHistoryCommands')) return replyEphemeral(i, '❌ أوامر تاريخ النقاط معطّلة حالياً.', COLORS.danger);
-        const categoryFilter = i.options.getString('category') || 'all';
-        const days = i.options.getInteger('days') || 30;
-        const onlyCurrentEpoch = i.options.getBoolean('only-current-epoch') !== false;
-        const showEpochs = i.options.getBoolean('show-epochs') || false;
-        
-        const userId = i.user.id;
-        const since = days > 0 ? clock.addDays(clock.today(), -days) : undefined;
-        
-        const history = points.history(userId, 100, { allEpochs: !onlyCurrentEpoch });
-        
-        // Apply category filter
-        let filteredHistory = history;
-        if (categoryFilter !== 'all') {
+
           filteredHistory = history.filter(entry => {
             const catKey = entry.reason_key;
             switch(categoryFilter) {

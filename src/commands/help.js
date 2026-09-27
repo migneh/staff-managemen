@@ -70,8 +70,8 @@ function dashboard(i) {
   if (waiting.length) e.addFields({ name: '⏳ قيد المتابعة', value: waiting.join('\n') });
   e.setFooter({ text: 'لوحة خاصة بك • التفاصيل في قائمة الإجراءات • استخدم تحديث لعرض آخر حالة' });
 
-  const context = accessContext(i);
-  const quick = quickRow(['my-ratings', 'my-performance', 'my-record', 'points-history', 'promotion-status', 'request-promotion', 'request-leave', 'my-leaves', 'leave-balance', 'my-resignations'], context, 'تقاريري وطلباتي…');
+const context = accessContext(i);
+   const quick = quickRow(['my-ratings', 'my-performance', 'my-record', 'promotion-status', 'request-promotion', 'request-leave', 'my-leaves', 'leave-balance', 'my-resignations'], context, 'تقاريري وطلباتي…');
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('nav:run:my-tasks').setLabel(pendingTasks ? `مهامي (${pendingTasks})` : 'مهامي').setEmoji('📋').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('faq:unread').setLabel(unread ? `للقراءة (${unread})` : 'غير المقروءة').setEmoji('📚').setStyle(ButtonStyle.Secondary),

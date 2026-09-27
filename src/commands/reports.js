@@ -158,34 +158,79 @@ module.exports = {
         const team = i.options.getString('team');
         const teams = team ? [team] : ['support', 'moderation'];
         return i.editReply({ embeds: teams.map(t => teamEmbed(t, reports.team(t))) });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('leaderboard').setDescription('ترتيب الإداريين (للإدارة فقط)')
-        .addStringOption(o => o.setName('team').setDescription('الفريق').addChoices({ name: 'فريق الدعم الفني', value: 'support' }, { name: 'فريق الإشراف', value: 'moderation' }, { name: 'عام', value: 'all' })),
-      level: LEVELS.SUPERVISOR,
-      async execute(i) {
-        await i.deferReply({ ephemeral: true });
-        const team = i.options.getString('team') || 'all';
-        if (team === 'all') return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard('support', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الدعم الفني'), leaderboardEmbed(reports.leaderboard('moderation', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الإشراف')] });
-        return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team, LEADERBOARD_WINDOW_DAYS), `🏆 ترتيب ${TEAMS[team]}`)] });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('points-history').setDescription('عرض تاريخ نقاطك مع تصدير CSV واعتراض موثق')
-        .addIntegerOption(o => o.setName('limit').setDescription('عدد الحركات (1-50)').setMinValue(1).setMaxValue(50).setRequired(false))
-        .addBooleanOption(o => o.setName('export').setDescription('تحميل السجل بصيغة CSV').setRequired(false)),
-      level: LEVELS.STAFF,
-      async execute(i) {
-        const limit = i.options.getInteger('limit') || 15;
-        const rows = points.history(i.user.id, limit);
-        if (i.options.getBoolean('export')) {
-          const file = new AttachmentBuilder(Buffer.from(pointsCsv(rows), 'utf8'), { name: `points-${i.user.id}.csv` });
-          return i.reply({ content: `🧾 سجل نقاطك — ${rows.length} حركة.`, files: [file], ephemeral: true });
-        }
-        return i.reply({ ...pointsHistoryEmbed(i.user.id, rows), ephemeral: true });
-      },
-    },
+},
+     },
+     {
+       data: new SlashCommandBuilder().setName('leaderboard').setDescription('ترتيب الإداريين (للإدارة فقط)')
+         .addStringOption(o => o.setName('team').setDescription('الفريق').addChoices({ name: 'فريق الدعم الفني', value: 'support' }, { name: 'فريق الإشراف', value: 'moderation' }, { name: 'عام', value: 'all' })),
+       level: LEVELS.SUPERVISOR,
+       async execute(i) {
+         await i.deferReply({ ephemeral: true });
+         const team = i.options.getString('team') || 'all';
+         if (team === 'all') return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard('support', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الدعم الفني'), leaderboardEmbed(reports.leaderboard('moderation', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الإشراف')] });
+         return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team, LEADERBOARD_WINDOW_DAYS), `🏆 ترتيب ${TEAMS[team]}`)] });
+       },
+     },
+     {
+       data: new SlashCommandBuilder().setName('score-weights').setDescription('عرض أو تعديل أوزان حساب Score')
+         .addStringOption(o => o.setName('action').setDescription('الإجراء').setRequired(true)
+           .addChoices(
+             { name: 'عرض الأوزان الحالية', value: 'view' },
+             { name: 'تعيين أوزان فريق الدعم', value: 'set-support' },
+             { name: 'تعيين أوزان فريق الإشراف', value: 'set-moderation' },
+             { name: 'تعيين أوزان فريق المساعد', value: 'set-helper' }
+           ))
+         .addStringOption(o => o.setName('weights').setDescription('الأوزان بصيغة JSON Например: {"tickets":30,"speed":25,"chat":25,"presence":20}'))
+       , level: LEVELS.BOSS,
+       async execute(i) {
+         const action = i.options.getString('action');
+         const weightsStr = i.options.getString('weights');
+         
+         if (action === 'view') {
+           const supportWeights = settings.scoreWeights('support');
+           const moderationWeights = settings.scoreWeights('moderation');
+           const helperWeights = settings.scoreWeights('helper');
+           
+           const e = kit.card({
+             title: '⚖️ أوزان حساب Score الحالية',
+             fields: [
+               { name: '🎫 فريق الدعم', value: Object.entries(supportWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+               { name: '🛡️ فريق الإشراف', value: Object.entries(moderationWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+               { name: '🎯 فريق المساعد', value: Object.entries(helperWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+             ],
+             color: COLORS.info,
+             footer: kit.footerLine('استخدم `/score-weights set-<team> <الأوزان_JSON>` لتعديل الأوزان')
+           });
+           return i.reply({ embeds: [e], ephemeral: true });
+         }
+         
+         if (action.startsWith('set-') && weightsStr) {
+           const team = action.substring(4); // removes 'set-'
+           let weights;
+           try {
+             weights = JSON.parse(weightsStr);
+           } catch (e) {
+             return replyEphemeral(i, '❌ تنسيق JSON غير صالح للأوزان', COLORS.danger);
+           }
+           
+           // Validate that weights sum to 100
+           const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+           if (sum !== 100) {
+             return replyEphemeral(i, `❌ مجموع الأوزان يجب أن يساوي 100، المجموع الحالي: ${sum}`, COLORS.danger);
+           }
+           
+           try {
+             settings.setScoreWeights(team as 'support' | 'moderation' | 'helper', weights);
+             const updatedWeights = settings.scoreWeights(team as 'support' | 'moderation' | 'helper');
+             return replyEphemeral(i, `✅ تم تحديث أوزان فريق ${team} بنجاح\n${Object.entries(updatedWeights).map(([k, v]) => `${k}: ${v}`).join('\n')}`, COLORS.success);
+           } catch (e) {
+             return replyEphemeral(i, `❌ فشل في تحديث الأوزان: ${e.message}`, COLORS.danger);
+           }
+         }
+         
+         return replyEphemeral(i, '❌ إجراء غير صالح أو أوزان غير محددة', COLORS.danger);
+       },
+     },
     {
       data: new SlashCommandBuilder().setName('point-appeals').setDescription('عرض اعتراضات النقاط المفتوحة')
         .addStringOption(o => o.setName('status').setDescription('الحالة').addChoices({ name: 'مفتوحة', value: 'pending' }, { name: 'كل الحالات', value: 'all' })),

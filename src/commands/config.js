@@ -17,16 +17,15 @@ module.exports = {
             { name: 'إعادة الإعدادات الافتراضية', value: 'reset' }
           ))
         .addStringOption(o => o.setName('feature').setDescription('الميزة')
-          .addChoices(
-            { name: 'نقاط تلقائية من التكتات', value: 'autoTicketPoints' },
-            { name: 'تقارير أسبوعية تلقائية', value: 'weeklyReports' },
-            { name: 'تقارير شهرية تلقائية', value: 'monthlyReports' },
-            { name: 'تتبع النشاط', value: 'activityTracking' },
-            { name: 'نظام العقوبات', value: 'punishmentSystem' },
-            { name: 'أوامر تاريخ النقاط', value: 'pointsHistoryCommands' },
-            { name: 'حالة النظام التفصيلية', value: 'detailedSystemStatus' },
-            { name: 'أمر تقدم الترقية', value: 'promotionProgress' },
-            { name: 'أمر حالتي الحالية', value: 'myStatusCommand' },
+.addChoices(
+             { name: 'نقاط تلقائية من التكتات', value: 'autoTicketPoints' },
+             { name: 'تقارير أسبوعية تلقائية', value: 'weeklyReports' },
+             { name: 'تقارير شهرية تلقائية', value: 'monthlyReports' },
+             { name: 'تتبع النشاط', value: 'activityTracking' },
+             { name: 'نظام العقوبات', value: 'punishmentSystem' },
+             { name: 'حالة النظام التفصيلية', value: 'detailedSystemStatus' },
+             { name: 'أمر تقدم الترقية', value: 'promotionProgress' },
+             { name: 'أمر حالتي الحالية', value: 'myStatusCommand' },
             { name: 'تصدير سجلات التدقيق', value: 'auditExport' },
             { name: 'نسخ احتياطية تلقائية', value: 'autoBackups' }
           )),
@@ -63,14 +62,13 @@ async function viewConfig(i) {
     weeklyReports: 'تقارير أسبوعية تلقائية',
     monthlyReports: 'تقارير شهرية تلقائية',
     activityTracking: 'تتبع النشاط',
-    punishmentSystem: 'نظام العقوبات',
-    pointsHistoryCommands: 'أوامر تاريخ النقاط',
-    detailedSystemStatus: 'حالة النظام التفصيلية',
-    promotionProgress: 'أمر تقدم الترقية',
-    myStatusCommand: 'أمر حالتي الحالية',
-    auditExport: 'تصدير سجلات التدقيق',
-    autoBackups: 'نسخ احتياطية تلقائية',
-  };
+punishmentSystem: 'نظام العقوبات',
+     detailedSystemStatus: 'حالة النظام التفصيلية',
+     promotionProgress: 'أمر تقدم الترقية',
+     myStatusCommand: 'أمر حالتي الحالية',
+     auditExport: 'تصدير سجلات التدقيق',
+     autoBackups: 'نسخ احتياطية تلقائية',
+   };
   
   for (const [key, name] of Object.entries(featureNames)) {
     toggles[name] = settings.featureToggle(key) ? '✅ مفعل' : '❌ معطل';

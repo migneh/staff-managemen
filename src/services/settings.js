@@ -110,17 +110,16 @@ function setScoreWeights(team, values) {
 
 // ===== ميزات قابلة للتبديل =====
 const FEATURE_TOGGLES_DEFAULTS = {
-  autoTicketPoints: true,        // نقاط تلقائية من التكتات
-  weeklyReports: true,           // تقارير أسبوعية تلقائية
-  monthlyReports: true,          // تقارير شهرية تلقائية
-  activityTracking: true,        // تتبع النشاط
-  punishmentSystem: true,        // نظام العقوبات (/warn, /note)
-  pointsHistoryCommands: true,   // أوامر تاريخ النقاط (/points-history, /points-overview)
-  detailedSystemStatus: true,    // حالة النظام التفصيلية
-  promotionProgress: true,       // أمر تقدم الترقية
-  myStatusCommand: true,         // أمر حالتي الحالية
-  auditExport: true,             // تصدير سجلات التدقيق
-  autoBackups: true,             // نسخ احتياطية تلقائية
+   autoTicketPoints: true,        // نقاط تلقائية من التكتات
+   weeklyReports: true,           // تقارير أسبوعية تلقائية
+   monthlyReports: true,          // تقارير شهرية تلقائية
+   activityTracking: true,        // تتبع النشاط
+   punishmentSystem: true,        // نظام العقوبات (/warn, /note)
+   detailedSystemStatus: true,    // حالة النظام التفصيلية
+   promotionProgress: true,       // أمر تقدم الترقية
+   myStatusCommand: true,         // أمر حالتي الحالية
+   auditExport: true,             // تصدير سجلات التدقيق
+   autoBackups: true,             // نسخ احتياطية تلقائية
 };
 
 function featureToggle(key) {
