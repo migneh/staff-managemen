@@ -12,6 +12,7 @@ const settings = require('../services/settings');
 const audit = require('../services/audit');
 const { getDb } = require('../database');
 const { embed, COLORS, replyEphemeral, progressBar, scoreColor, scoreEmoji, divider, nowIso } = require('../utils');
+const kit = require('../ui/kit');
 const { LEADERBOARD_MIN_ACTIVE_DAYS } = require('../services/reports');
 
 /** النافذة الموحّدة للترتيب — أسبوعان أعدل من 7 أيام في الفرق الصغيرة */
@@ -171,66 +172,47 @@ module.exports = {
          return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team, LEADERBOARD_WINDOW_DAYS), `🏆 ترتيب ${TEAMS[team]}`)] });
        },
      },
-     {
-       data: new SlashCommandBuilder().setName('score-weights').setDescription('عرض أو تعديل أوزان حساب Score')
-         .addStringOption(o => o.setName('action').setDescription('الإجراء').setRequired(true)
-           .addChoices(
-             { name: 'عرض الأوزان الحالية', value: 'view' },
-             { name: 'تعيين أوزان فريق الدعم', value: 'set-support' },
-             { name: 'تعيين أوزان فريق الإشراف', value: 'set-moderation' },
-             { name: 'تعيين أوزان فريق المساعد', value: 'set-helper' }
-           ))
-         .addStringOption(o => o.setName('weights').setDescription('الأوزان بصيغة JSON Например: {"tickets":30,"speed":25,"chat":25,"presence":20}'))
-       , level: LEVELS.BOSS,
-       async execute(i) {
-         const action = i.options.getString('action');
-         const weightsStr = i.options.getString('weights');
-         
-         if (action === 'view') {
-           const supportWeights = settings.scoreWeights('support');
-           const moderationWeights = settings.scoreWeights('moderation');
-           const helperWeights = settings.scoreWeights('helper');
-           
-           const e = kit.card({
-             title: '⚖️ أوزان حساب Score الحالية',
-             fields: [
-               { name: '🎫 فريق الدعم', value: Object.entries(supportWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
-               { name: '🛡️ فريق الإشراف', value: Object.entries(moderationWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
-               { name: '🎯 فريق المساعد', value: Object.entries(helperWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
-             ],
-             color: COLORS.info,
-             footer: kit.footerLine('استخدم `/score-weights set-<team> <الأوزان_JSON>` لتعديل الأوزان')
-           });
-           return i.reply({ embeds: [e], ephemeral: true });
-         }
-         
-         if (action.startsWith('set-') && weightsStr) {
-           const team = action.substring(4); // removes 'set-'
-           let weights;
-           try {
-             weights = JSON.parse(weightsStr);
-           } catch (e) {
-             return replyEphemeral(i, '❌ تنسيق JSON غير صالح للأوزان', COLORS.danger);
-           }
-           
-           // Validate that weights sum to 100
-           const sum = Object.values(weights).reduce((a, b) => a + b, 0);
-           if (sum !== 100) {
-             return replyEphemeral(i, `❌ مجموع الأوزان يجب أن يساوي 100، المجموع الحالي: ${sum}`, COLORS.danger);
-           }
-           
-           try {
-             settings.setScoreWeights(team as 'support' | 'moderation' | 'helper', weights);
-             const updatedWeights = settings.scoreWeights(team as 'support' | 'moderation' | 'helper');
-             return replyEphemeral(i, `✅ تم تحديث أوزان فريق ${team} بنجاح\n${Object.entries(updatedWeights).map(([k, v]) => `${k}: ${v}`).join('\n')}`, COLORS.success);
-           } catch (e) {
-             return replyEphemeral(i, `❌ فشل في تحديث الأوزان: ${e.message}`, COLORS.danger);
-           }
-         }
-         
-         return replyEphemeral(i, '❌ إجراء غير صالح أو أوزان غير محددة', COLORS.danger);
-       },
-     },
+      {
+        data: new SlashCommandBuilder().setName('score-weights')
+          .setDescription('عرض أو تعديل أوزان حساب Score')
+          .addStringOption(o => o.setName('action').setDescription('الإجراء').setRequired(true)
+            .addChoices(
+              { name: 'عرض الأوزان الحالية', value: 'view' },
+              { name: 'تعيين أوزان فريق', value: 'set' }
+            ))
+          .addStringOption(o => o.setName('team').setDescription('الفريق (required for set action)')
+            .addChoices(
+              { name: 'Helper', value: 'helper' },
+              { name: 'Support', value: 'support' },
+              { name: 'الإشراف', value: 'moderation' }
+            ))
+        , level: LEVELS.BOSS,
+        async execute(i) {
+          const action = i.options.getString('action');
+          if (action === 'view') {
+            const supportWeights = settings.scoreWeights('support');
+            const moderationWeights = settings.scoreWeights('moderation');
+            const helperWeights = settings.scoreWeights('helper');
+            const e = kit.card({
+              title: '⚖️ أوزان حساب Score الحالية',
+              fields: [
+                { name: '🎫 فريق الدعم', value: Object.entries(supportWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+                { name: '🛡️ فريق الإشراف', value: Object.entries(moderationWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+                { name: '🎯 فريق المساعد', value: Object.entries(helperWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+              ],
+              color: COLORS.info,
+              footer: kit.footerLine('استخدم `/score-weights set <الفريق>` لتعديل الأوزان عبر النموذج')
+            });
+            return i.reply({ embeds: [e], ephemeral: true });
+          }
+          if (action === 'set') {
+            const team = i.options.getString('team');
+            const current = settings.scoreWeights(team);
+            return forms.open(i, modals.weights({ team, current }));
+          }
+          return replyEphemeral(i, '❌ إجراء غير صالح', COLORS.danger);
+        },
+      },
     {
       data: new SlashCommandBuilder().setName('point-appeals').setDescription('عرض اعتراضات النقاط المفتوحة')
         .addStringOption(o => o.setName('status').setDescription('الحالة').addChoices({ name: 'مفتوحة', value: 'pending' }, { name: 'كل الحالات', value: 'all' })),
@@ -253,17 +235,6 @@ module.exports = {
         if (!['support', 'moderation'].includes(team)) return i.editReply({ embeds: [embed('⚖️ توزيع الحمل', 'اختر فريقاً صالحاً.', COLORS.danger)] });
         const days = i.options.getInteger('days') || 7;
         return i.editReply({ embeds: [loadEmbed(team, load.teamLoad(team, days), days)] });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('score-weights').setDescription('تعديل أوزان Score — مجموعها يجب أن يساوي 100')
-        .addStringOption(o => o.setName('team').setDescription('الفئة').setRequired(true).addChoices(
-          { name: 'Helper', value: 'helper' }, { name: 'Support فأعلى', value: 'support' }, { name: 'فريق الإشراف', value: 'moderation' })),
-      level: LEVELS.MANAGEMENT,
-      async execute(i) {
-        const team = i.options.getString('team');
-        const current = settings.scoreWeights(team);
-        return forms.open(i, modals.weights({ team, current }));
       },
     },
     {
