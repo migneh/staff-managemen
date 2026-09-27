@@ -1,9 +1,8 @@
 'use strict';
 const { homeRow } = require('../ui/navigation');
 const { SlashCommandBuilder } = require('discord.js');
-const { LEVELS, NOTE_TYPES, WARNING_TYPES, COOLDOWNS, TEAMS, STATUS } = require('../constants');
+const { LEVELS, NOTE_TYPES, WARNING_TYPES, TEAMS, STATUS } = require('../constants');
 const { getDb } = require('../database');
-const points = require('../services/points');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
 const { embed, COLORS, replyEphemeral, dm, log, discordTs, sendToChannel, arDigits } = require('../utils');
@@ -16,7 +15,7 @@ function recordEmbed(userId, { includeSecret }) {
   const warns = db.prepare('SELECT * FROM warnings WHERE user_id = ? ORDER BY id DESC LIMIT 10').all(userId);
   const s = staffService.get(userId);
   const e = embed(`📁 سجل الإداري ${userId}`, null, COLORS.info)
-    .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}\n🎯 نقاط الترقية: **${points.total(userId)}**`);
+    .setDescription(`👤 <@${userId}>${s ? ` • ${s.rank} • ${TEAMS[s.team] || s.team}` : ''}`);
   // ===== تاريخ الرتب: من رقّى مَن ومتى =====
   const RANK_CHANGE = {
     promote: '⬆️ ترقية', demote: '⬇️ تنزيل', reassign: '↔️ إعادة تعيين', reinstate: '↩️ إعادة تفعيل',
@@ -61,11 +60,10 @@ module.exports = {
         const target = staffService.get(user.id);
         if (!target) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
         const res = getDb().prepare('INSERT INTO staff_notes (user_id, note_type, content, is_secret, added_by) VALUES (?, ?, ?, ?, ?)').run(user.id, type, content, secret, i.user.id);
-        const pts = points.add(user.id, type === 'positive' ? 'positive_note' : 'negative_note', target.team, { refType: 'note', refId: res.lastInsertRowid, addedBy: i.user.id });
         audit.record({ action: 'staff_note_added', actorId: i.user.id, targetId: user.id, details: { type, secret: !!secret, rowId: res.lastInsertRowid }, channelId: i.channelId });
         const def = NOTE_TYPES[type];
-        await replyEphemeral(i, `${def.emoji} تمت إضافة ${def.label} على <@${user.id}> (${pts > 0 ? '+' : ''}${pts} نقطة)${secret ? ' 🔒' : ''}.`, COLORS.success);
-        if (!secret) await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label} جديدة`, `${content}\n\n**النقاط:** ${pts > 0 ? '+' : ''}${pts}`, type === 'positive' ? COLORS.success : COLORS.warning)] });
+        await replyEphemeral(i, `${def.emoji} تمت إضافة ${def.label} على <@${user.id}>${secret ? ' 🔒' : ''}.`, COLORS.success);
+        if (!secret) await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label} جديدة`, `${content}`, type === 'positive' ? COLORS.success : COLORS.warning)] });
         return log(i.client, `${def.emoji} ${def.label}${secret ? ' 🔒' : ''}`, `على <@${user.id}> بواسطة <@${i.user.id}>\n${content}`, COLORS.gray);
       },
     },
@@ -73,7 +71,7 @@ module.exports = {
       data: new SlashCommandBuilder().setName('warn').setDescription('إصدار إنذار على إداري')
         .addUserOption(o => o.setName('user').setDescription('الإداري').setRequired(true))
         .addStringOption(o => o.setName('type').setDescription('نوع الإنذار').setRequired(true)
-          .addChoices(...Object.entries(WARNING_TYPES).map(([v, d]) => ({ name: `${d.emoji} ${d.label} (${d.points})`, value: v }))))
+          .addChoices(...Object.entries(WARNING_TYPES).map(([v, d]) => ({ name: `${d.emoji} ${d.label}`, value: v }))))
         .addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(true).setMaxLength(500)),
       level: LEVELS.SUPERVISOR,
       async execute(i) {
@@ -87,18 +85,17 @@ module.exports = {
         if (user.id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إنذار نفسك.', COLORS.danger);
 
         const res = getDb().prepare('INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES (?, ?, ?, ?)').run(user.id, type, reason, i.user.id);
-        const pts = points.add(user.id, type === 'verbal' ? 'verbal_warning' : 'formal_warning', target.team, { refType: 'warning', refId: res.lastInsertRowid, addedBy: i.user.id });
         audit.record({ action: 'staff_warning_issued', actorId: i.user.id, targetId: user.id, details: { type, reason, rowId: res.lastInsertRowid }, channelId: i.channelId });
         let extra = '';
         if (def.suspend) {
           // إيقاف بتاريخ انتهاء واضح: 60 يوماً لتجميد الترقية، ثم رفع تلقائي للصلاحيات
-          const until = points.setCooldown(user.id, 'suspended', COOLDOWNS.suspended);
-          staffService.suspend(user.id, until);
-          extra = `\n⛔ تم الإيقاف + تجميد الترقية حتى ${until}\n↩️ يُرفع الإيقاف تلقائياً في ${until} (أو يدوياً بـ \`/unsuspend\`)`;
-        } else if (def.freezeDays) { const until = points.setCooldown(user.id, 'warning', def.freezeDays); extra = `\n🧊 تجميد الترقية حتى ${until}`; }
+          staffService.suspend(user.id, '60 days');
+          extra = `\n⛔ تم الإيقاف\n↩️ يُرفع الإيقاف تلقائياً بعد 60 يوماً (أو يدوياً بـ \`/unsuspend\`)`;
+        } else if (def.freezeDays) { extra = `\n🧊 فترة تبريد للترقية: ${def.freezeDays} يوماً`; }
 
-        await replyEphemeral(i, `${def.emoji} تم إصدار **${def.label}** على <@${user.id}> (${pts} نقطة).${extra}`, COLORS.warning);
-        await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label}`, `**السبب:** ${reason}\n**النقاط:** ${pts}${extra}\n\nبواسطة: <@${i.user.id}>`, COLORS.danger)] });
+        await replyEphemeral(i, `${def.emoji} تم إصدار **${def.label}** على <@${user.id}>.${extra}`, COLORS.warning);
+        await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label}`, `**السبب:** ${reason}${extra}\n\nبواسطة: <@${i.user.id}>`, COLORS.danger)] });
+        return log(i.client, `${def.emoji} ${def.label}`, `على <@${user.id}> بواسطة <@${i.user.id}>\n${reason}${extra}`, COLORS.danger);
         return log(i.client, `${def.emoji} ${def.label}`, `على <@${user.id}> بواسطة <@${i.user.id}>\n${reason}${extra}`, COLORS.danger);
       },
     },

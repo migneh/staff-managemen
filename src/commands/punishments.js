@@ -1,10 +1,9 @@
 'use strict';
 const forms = require('../ui/forms');
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, UserSelectMenuBuilder } = require('discord.js');
-const { LEVELS, WARNING_TYPES, NOTE_TYPES, POINTS, COOLDOWNS, STATUS } = require('../constants');
+const { LEVELS, WARNING_TYPES, NOTE_TYPES, STATUS } = require('../constants');
 const settings = require('../services/settings');
 const { getDb } = require('../database');
-const points = require('../services/points');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
 const { COLORS, replyEphemeral, sendToChannel, dm, log } = require('../utils');

@@ -66,7 +66,7 @@ module.exports = {
         const e = embed('🩺 صحة النظام', `${divider}`, COLORS.primary)
           .addFields(
             { name: '⏰ المهام المجدولة', value: lines.length ? lines.join('\n') : 'لا توجد مهام مسجّلة (المجدول لم يبدأ بعد).' },
-            { name: '🗄️ قاعدة البيانات', value: `الحجم: **${sizeMb} م.ب** ${sizeStatus}${sizeWarning}\nإداريون: **${counts.staff_members}** • نشاط خام: **${counts.activity_logs}** • أشهر مُجمَّعة: **${rolledMonths}**\nتكتات: **${counts.ticket_metrics}** • نقاط: **${counts.promotion_points}** • عمليات: **${counts.audit_logs}**\nسجل الرتب: **${counts.staff_rank_history}** • فحوص النسخ: **${counts.backup_checks}**`, inline: false },
+            { name: '🗄️ قاعدة البيانات', value: `الحجم: **${sizeMb} م.ب** ${sizeStatus}${sizeWarning}\nإداريون: **${counts.staff_members}** • نشاط خام: **${counts.activity_logs}** • أشهر مُجمَّعة: **${rolledMonths}**\nتكتات: **${counts.ticket_metrics}** • عمليات: **${counts.audit_logs}**\nسجل الرتب: **${counts.staff_rank_history}** • فحوص النسخ: **${counts.backup_checks}**`, inline: false },
           );
 
         // Add detailed database info if requested
@@ -79,7 +79,6 @@ module.exports = {
                 activity_logs: '📝 نشاط خام',
                 activity_monthly: '📊 نشاط شهري',
                 ticket_metrics: '🎫 تكتات',
-                promotion_points: '💯 نقاط الترقية',
                 audit_logs: '📒 سجل العمليات',
                 staff_rank_history: '📜 تاريخ الرتب',
                 backup_checks: '💾 فحوص النسخ',
