@@ -9,9 +9,20 @@ async function deployCommands() {
   const body = [...commands.values()].map(c => c.data.toJSON());
   const rest = new REST().setToken(config.token);
   console.log(`🚀 تسجيل ${body.length} أمر في السيرفر ${config.guildId}...`);
-  await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body });
-  console.log('✅ تم تسجيل الأوامر:', body.map(c => `/${c.name}`).join(' '));
-  return body.length;
+  const registered = await rest.put(
+    Routes.applicationGuildCommands(config.clientId, config.guildId),
+    { body }
+  );
+
+  // Discord يعيد القائمة التي حفظها فعلياً؛ لا نعلن النجاح إذا أسقط أمراً.
+  const registeredNames = new Set(registered.map(command => command.name));
+  const missing = body.map(command => command.name).filter(name => !registeredNames.has(name));
+  if (missing.length) {
+    throw new Error(`لم يسجّل Discord الأوامر التالية: ${missing.map(name => `/${name}`).join(' ')}`);
+  }
+
+  console.log(`✅ تم تسجيل وتأكيد ${registered.length} أمر:`, body.map(c => `/${c.name}`).join(' '));
+  return registered.length;
 }
 
 module.exports = { deployCommands };
