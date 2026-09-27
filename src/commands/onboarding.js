@@ -28,7 +28,7 @@ module.exports = {
         )
         .addSubcommand(sub =>
           sub.setName('my-progress')
-            .setdescription('عرض تقدم تأهيلك الشخصي')
+            .setDescription('عرض تقدم تأهيلك الشخصي')
         ),
       level: LEVELS.STAFF,
       async execute(i) {

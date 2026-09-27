@@ -1,6 +1,7 @@
 'use strict';
 const { getDb } = require('../database');
 const { nowIso, today, addDays } = require('../utils');
+const staffService = require('./staff');
 
 function ensureOnboarding(userId) {
   const db = getDb();
@@ -169,8 +170,8 @@ function createTeamMission(teamId, title, description, dueDate, assignedBy = nul
   const teamMembers = staffService.all({ team: teamId });
   
   // تعيين المهمة لكل عضو في الفريق
-  const insert = getDb().prepare('INSERT INTO staff_tasks (user_id, title, description, task_type, due_date, assigned_by, mission_id, priority, tags, team_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  const insert = getDb().prepare(`INSERT INTO staff_tasks (user_id, title, description, task_type, due_date, assigned_by, mission_id, priority, tags, team_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     
   teamMembers.forEach(member => {
     insert.run(

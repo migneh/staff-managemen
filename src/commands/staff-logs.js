@@ -105,7 +105,7 @@ module.exports = {
           if (detailed && log.details) {
             try {
               const parsed = JSON.parse(log.details);
-              details = `\n```json\n${JSON.stringify(parsed, null, 2)}\n````;
+              details = '\n```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
             } catch {
               details = `\n${log.details}`;
             }

@@ -477,9 +477,6 @@ function start(client) {
   logger.info(`⏰ المجدول يعمل (${jobs.length} مهمة • المنطقة الزمنية ${tz}).`);
 }
 
-const scheduledTasks = [];
-const lastRun = new Map();
-
 function stop() {
   for (const t of scheduledTasks) { try { t.stop(); } catch { /* ignore */ } }
   scheduledTasks.length = 0;

@@ -18,7 +18,8 @@ const modals = {
     note: 'البحث يعرض الأوامر المتاحة لك فقط حسب رتبتك وفريقك.',
   }),
 };
-const { scoreEmoji, tsRelative, tsDate } = require('../ui/kit');
+const { tsRelative, tsDate } = require('../ui/kit');
+const { scoreEmoji } = require('../utils');
 const staffService = require('../services/staff');
 const reports = require('../services/reports');
 const promo = require('../services/promotions');

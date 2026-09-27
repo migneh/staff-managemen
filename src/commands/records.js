@@ -68,38 +68,6 @@ module.exports = {
       },
     },
     {
-      data: new SlashCommandBuilder().setName('warn').setDescription('إصدار إنذار على إداري')
-        .addUserOption(o => o.setName('user').setDescription('الإداري').setRequired(true))
-        .addStringOption(o => o.setName('type').setDescription('نوع الإنذار').setRequired(true)
-          .addChoices(...Object.entries(WARNING_TYPES).map(([v, d]) => ({ name: `${d.emoji} ${d.label}`, value: v }))))
-        .addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(true).setMaxLength(500)),
-      level: LEVELS.SUPERVISOR,
-      async execute(i) {
-        const user = i.options.getUser('user');
-        const type = i.options.getString('type');
-        const reason = i.options.getString('reason');
-        const def = WARNING_TYPES[type];
-        if (i.staffLevel < def.minLevel) return replyEphemeral(i, `❌ ${def.label} يتطلب صلاحية أعلى.`, COLORS.danger);
-        const target = staffService.get(user.id);
-        if (!target) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
-        if (user.id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إنذار نفسك.', COLORS.danger);
-
-        const res = getDb().prepare('INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES (?, ?, ?, ?)').run(user.id, type, reason, i.user.id);
-        audit.record({ action: 'staff_warning_issued', actorId: i.user.id, targetId: user.id, details: { type, reason, rowId: res.lastInsertRowid }, channelId: i.channelId });
-        let extra = '';
-        if (def.suspend) {
-          // إيقاف بتاريخ انتهاء واضح: 60 يوماً لتجميد الترقية، ثم رفع تلقائي للصلاحيات
-          staffService.suspend(user.id, '60 days');
-          extra = `\n⛔ تم الإيقاف\n↩️ يُرفع الإيقاف تلقائياً بعد 60 يوماً (أو يدوياً بـ \`/unsuspend\`)`;
-        } else if (def.freezeDays) { extra = `\n🧊 فترة تبريد للترقية: ${def.freezeDays} يوماً`; }
-
-        await replyEphemeral(i, `${def.emoji} تم إصدار **${def.label}** على <@${user.id}>.${extra}`, COLORS.warning);
-        await dm(i.client, user.id, { embeds: [embed(`${def.emoji} ${def.label}`, `**السبب:** ${reason}${extra}\n\nبواسطة: <@${i.user.id}>`, COLORS.danger)] });
-        return log(i.client, `${def.emoji} ${def.label}`, `على <@${user.id}> بواسطة <@${i.user.id}>\n${reason}${extra}`, COLORS.danger);
-        return log(i.client, `${def.emoji} ${def.label}`, `على <@${user.id}> بواسطة <@${i.user.id}>\n${reason}${extra}`, COLORS.danger);
-      },
-    },
-    {
       data: new SlashCommandBuilder().setName('staff-record').setDescription('عرض سجل إداري (إنذارات وملاحظات)')
         .addUserOption(o => o.setName('user').setDescription('الإداري').setRequired(true)),
       level: LEVELS.SUPERVISOR,

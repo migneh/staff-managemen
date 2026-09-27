@@ -40,7 +40,7 @@ function actionTypePicker() {
   };
 }
 function actionCard(draft, { pending = false, rowId = null } = {}) {
-   const return kit.card({
+   return kit.card({
      title: pending ? `🛡️ تأكيد تسجيل: ${MOD_ACTION_TYPES[draft.type]}` : `✅ سُجّل إجراء: ${MOD_ACTION_TYPES[draft.type]}`,
      description: pending
        ? '_لن يُكتب أي شيء في السجل حتى تضغط «تأكيد التسجيل»._'
@@ -162,7 +162,7 @@ function ticketEmbed(result, loggedBy, sourceLabel = 'يدوي') {
   const row = result.row;
   return kit.card({
     title: `🎫 تكت مسجل ${result.reopened ? '♻️' : ''}`,
-    description: result.reopened ? '_أُعيد فتح هذا التكت، ونقاطه محسوبة مرة واحدة فقط._' : '_تكت مكتمل ونقاطه محتسبة._',
+    description: result.reopened ? '_أُعيد فتح هذا التكت._' : '_تكت مكتمل._',
     color: result.reopened ? COLORS.warning : COLORS.success,
     fields: [
       { name: '🔢 رقم التكت', value: `\`${row.ticketId}\``, inline: true },
@@ -171,7 +171,6 @@ function ticketEmbed(result, loggedBy, sourceLabel = 'يدوي') {
       { name: '🔒 أغلقه', value: `<@${row.closer || row.claimer}>`, inline: true },
       { name: '⭐ التقييم', value: row.rating ? '⭐'.repeat(row.rating) : '—', inline: true },
       { name: '⏱️ المدة', value: row.duration != null ? `${row.duration} دقيقة` : '—', inline: true },
-      { name: '💠 النقاط', value: `${result.earned >= 0 ? '+' : ''}${result.earned}`, inline: true },
       { name: '🧭 المصدر', value: sourceLabel, inline: true },
       row.ticketUrl ? { name: '🔗 سجل التكت الخارجي', value: row.ticketUrl, inline: false } : null,
     ],
@@ -305,7 +304,7 @@ module.exports = {
 'modaction:cancel': async (i, [token]) => {
       const draft = getDraft(i, token);
       if (draft && draft.actorId === i.user.id) drafts.delete(token);
-      return i.update({ embeds: [kit.notice('neutral', 'أُلغي الإجراء', 'لم يُسجَّل أي إجراء.', { footer: kit.footerLine('🛡️ إجراء ملغى') })], components: [] );
+      return i.update({ embeds: [kit.notice('neutral', 'أُلغي الإجراء', 'لم يُسجَّل أي إجراء.', { footer: kit.footerLine('🛡️ إجراء ملغى') })], components: [] });
     },
 
     'modaction:edit': async (i, [token]) => {
