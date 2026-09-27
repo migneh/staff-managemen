@@ -732,12 +732,12 @@ module.exports = {
                .addChoices(...Object.entries(LEAVE_TYPES).map(([v, n]) => ({ name: `${LEAVE_RULES[v]?.emoji || '🏖️'} ${n}`, value: v }))))
              .addIntegerOption(o => o.setName('duration').setDescription('المدة الافتراضية بالأيام'))
              .addStringOption(o => o.setName('reason').setDescription('السبب الافتراضي'))
-             .addBooleanOption(o => o.setName('public').setdescription('قالب عام للجميع'))
+             .addBooleanOption(o => o.setName('public').setDescription('قالب عام للجميع'))
          )
          .addSubcommand(sub =>
            sub.setName('use')
              .setDescription('استخدام قالب إجازة لإنشاء طلب جديد')
-             .addStringOption(o => o.setName('id').setdescription('معرف القالب').setRequired(true))
+             .addStringOption(o => o.setName('id').setDescription('معرف القالب').setRequired(true))
              .addStringOption(o => o.setName('reason').setDescription('السبب (يOverride الافتراضي)')
              .addIntegerOption(o => o.setName('duration').setDescription('المدة بالأيام (يOverride الافتراضي)'))
          )
@@ -1069,16 +1069,92 @@ module.exports = {
       await updateRequestMessage(i.client, result.row);
       return replyEphemeral(i, `✅ تم تمديد الطلب **#${id}** إلى **${newEnd}**.`, COLORS.success);
     },
-    'leave:pending': async (i, [page]) => {
-      const { items, total, pages } = leaveService.list({ status: 'pending', perPage: 4, page: Number(page) });
-      if (!total) return i.update({ embeds: [embed('✅ لا توجد طلبات', 'انتهت المراجعة.', COLORS.success)], components: [] });
-      // نعيد بناء الصفحة
-      await i.update({ embeds: [embed(`⏳ طلبات معلقة — صفحة ${page}/${pages}`, `العدد: **${total}**`, COLORS.warning)], components: [kit.navRow({ prefix: 'leave:pending', page: Number(page), pages })] });
-      for (const r of items) {
-        await i.followUp({ embeds: [reviewCard(r)], components: [reviewRow(r.id)], ephemeral: true });
-      }
-    },
-  },
+'leave:pending': async (i, [page]) => {
+       const { items, total, pages } = leaveService.list({ status: 'pending', perPage: 4, page: Number(page) });
+       if (!total) return i.update({ embeds: [embed('✅ لا توجد طلبات', 'انتهت المراجعة.', COLORS.success)], components: [] });
+       // نعيد بناء PAGE
+       await i.update({ embeds: [embed(`⏳ طلبات معلقة — página ${page}/${pages}`, `العدد: **${total}**`, COLORS.warning)], components: [kit.navRow({ prefix: 'leave:pending', page: Number(page), pages })] });
+       for (const r of items) {
+         await i.followUp({ embeds: [reviewCard(r)], components: [reviewRow(r.id)], ephemeral: true });
+       }
+     },
+     'templates:list': async (i) => {
+       const type = i.options.getString('type') || 'all';
+       let templates;
+       
+       if (type === 'private') {
+         templates = leaveService.listLeaveTemplates({ userId: i.user.id });
+       } else if (type === 'public') {
+         templates = leaveService.listLeaveTemplates({ includePublic: true });
+       } else {
+         // All: user's private + public
+         const userTemplates = leaveService.listLeaveTemplates({ userId: i.user.id });
+         const publicTemplates = leaveService.listLeaveTemplates({ includePublic: true });
+         templates = [...userTemplates, ...publicTemplates];
+       }
+       
+       if (!templates.length) {
+         return replyEphemeral(i, 'لا توجد قوالب إجازة. استخدم `/templates create` لإنشاء أول قالب.', COLORS.gray);
+       }
+       
+       const e = embed('📋 قوالب الإجازة', templates.map(t => 
+         `${t.is_public ? '🌐' : '🔒'} **${t.name}** (${LEAVE_TYPES[t.leave_type]})`
+         + `${t.default_duration ? ` • ${t.default_duration} يوم` : ''}`
+         + `${t.default_reason ? ` • ${t.default_reason}` : ''}`
+         + `${t.description ? `\n  ${t.description}` : ''}`
+       ).join('\n'), COLORS.info);
+       
+       return i.reply({ embeds: [e], ephemeral: true });
+     },
+     'templates:create': async (i) => {
+       const id = i.options.getString('id');
+       const name = i.options.getString('name');
+       const description = i.options.getString('description');
+       const type = i.options.getString('type');
+       const duration = i.options.getInteger('duration');
+       const reason = i.options.getString('reason');
+       const isPublic = i.options.getBoolean('public') ? 1 : 0;
+       
+       const template = leaveService.createLeaveTemplate({
+         id,
+         userId: i.user.id,
+         name,
+         description,
+         leaveType: type,
+         defaultDuration: duration,
+         defaultReason: reason,
+         isPublic
+       });
+       
+       if (!template) return replyEphemeral(i, '❌ فشل إنشاء القالب. قد يكون المعرف مكرراً.', COLORS.danger);
+       
+       audit.record({ action: 'leave_template_created', actorId: i.user.id, details: { templateId: id, name, leaveType: type, isPublic }, channelId: i.channelId });
+       
+       return replyEphemeral(i, `✅ تم إنشاء القالب **${name}** (${LEAVE_TYPES[type]}) ${isPublic ? '🌐 عام' : '🔒 خاص'}.`, COLORS.success);
+     },
+     'templates:use': async (i) => {
+       const id = i.options.getString('id');
+       const reasonOverride = i.options.getString('reason');
+       const durationOverride = i.options.getInteger('duration');
+       
+       const template = leaveService.useLeaveTemplate(id, i.user.id, { reason: reasonOverride, duration_days: durationOverride });
+       
+       if (!template) return replyEphemeral(i, '❌ القالب غير موجود أو لا صلاحيات له.', COLORS.danger);
+       
+       // Save as draft and show quick card
+       const draft = saveDraft(i, { 
+         leaveType: template.leave_type, 
+         start: null, 
+         end: null, 
+         days: template.duration_days, 
+         reason: template.reason, 
+         attachment: null,
+         templateId: template.id 
+       });
+       
+       return i.reply({ embeds: [quickCard(draft)], ephemeral: true });
+     },
+   },
 };
 
 function covText(cov) {
