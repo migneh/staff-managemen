@@ -66,8 +66,6 @@ if (status === 'approved') {
      const target = staffService.get(row.user_id);
      if (!target) return replyEphemeral(i, '❌ العضو غير مسجل حالياً.', COLORS.danger);
      db.prepare('UPDATE warnings SET voided_at = datetime(\'now\'), voided_by = ?, void_reason = ? WHERE id = ?').run(i.user.id, `قبول الاستئناف #${row.id}`, row.warning_id);
-     const ledger = db.prepare("SELECT * FROM promotion_points WHERE ref_type = 'warning' AND ref_id = ? ORDER BY id DESC LIMIT 1").get(String(row.warning_id));
-     // نظام النقاط محذوف؛ لا يتم إنشاء حركة نقاط عند قبول الاستئناف.
    }
   db.prepare('UPDATE warning_appeals SET status = ?, reviewed_by = ?, review_reason = ?, reviewed_at = datetime(\'now\') WHERE id = ?')
     .run(status, i.user.id, status === 'approved' ? 'تم قبول الاستئناف وإلغاء الإنذار' : 'تم رفض الاستئناف', row.id);
