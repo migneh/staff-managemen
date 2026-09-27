@@ -279,52 +279,9 @@ function pendingCount(userId, { taskType = null, missionId = null } = {}) {
 }
 
 function listByType(taskType, { includeCompleted = false, limit = 50 } = {}) {
-  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
-  return getDb().prepare(`SELECT * FROM staff_tasks WHERE task_type = ? ${includeCompleted ? "" : "AND status = 'pending'"}
-    ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?`).all(taskType, safeLimit);
-}
-
-/**
- * إنشاء مهمة من قالب
- */
-function createFromTemplate(userId, templateId, assignedBy = null) {
-  const db = getDb();
-  const template = db.prepare('SELECT * FROM mission_templates WHERE id = ? AND is_active = 1').get(templateId);
-  if (!template) return null;
-  
-  const tasks = JSON.parse(template.tasks);
-  const startDate = today();
-  const createdTasks = [];
-  
-  const insert = db.prepare('INSERT INTO staff_tasks (user_id, title, description, task_type, due_date, assigned_by, mission_id, priority, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  
-  for (const taskDef of tasks) {
-    const dueDate = taskDef.due_offset ? addDays(startDate, taskDef.due_offset) : null;
-    const result = insert.run(
-      userId,
-      taskDef.title,
-      taskDef.description,
-      'mission',
-      dueDate,
-      assignedBy || null,
-      templateId,
-      taskDef.priority || 'normal',
-      '[]'
-    );
-    createdTasks.push(get(result.lastInsertRowid));
-  }
-  
-  return createdTasks;
-}
-
-/**
- * إنشاء مهمة متكررة
- */
-function createRecurring(userId, title, description, recurrence, startDate, assignedBy = null) {
-  const result = getDb().prepare(`INSERT INTO staff_tasks (user_id, title, description, task_type, due_date, assigned_by, tags) 
-    VALUES (?, ?, ?, 'recurring', ?, ?, ?)`)
-    .run(userId, title, description, startDate, assignedBy || null, JSON.stringify({ recurrence }));
-  return get(result.lastInsertRowid);
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    return getDb().prepare(`SELECT * FROM staff_tasks WHERE task_type = ? ${includeCompleted ? "" : "AND status = 'pending'"}
+      ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?`).all(taskType, safeLimit);
 }
 
 /**

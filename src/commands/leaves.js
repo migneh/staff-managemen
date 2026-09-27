@@ -709,9 +709,40 @@ module.exports = {
           .addFields({ name: 'التغطية العامة', value: `${kit.coverageBar(cov.count, cov.max)} • ${cov.count}/${cov.max}`, inline: true });
         e.addFields({ name: 'تغطية الفرق', value: Object.values(teams.teams).map(t => `${TEAMS[t.team] || t.team}: **${t.min}** من ${t.size}${t.below ? ' ⚠️' : ' ✅'}`).join('\n') || '—', inline: true });
         return i.reply({ embeds: [e], ephemeral: true });
-      },
-    },
-  ],
+},
+     },
+     {
+       data: new SlashCommandBuilder().setName('templates').setDescription('إدارة قوالب الإجازة')
+         .addSubcommand(sub =>
+           sub.setName('list')
+             .setDescription('عرض قوالب الإجازة المتاحة')
+             .addStringOption(o => o.setName('type').setDescription('نوع القالب').addChoices(
+               { name: 'خاصة بي', value: 'private' },
+               { name: 'عامة للجميع', value: 'public' },
+               { name: 'الكل', value: 'all' }
+             ))
+         )
+         .addSubcommand(sub =>
+           sub.setName('create')
+             .setDescription('إنشاء قالب إجازة جديد')
+             .addStringOption(o => o.setName('id').setDescription('معرف القالب (مثال: weekly_family)').setRequired(true))
+             .addStringOption(o => o.setName('name').setDescription('اسم القالب').setRequired(true))
+             .addStringOption(o => o.setName('description').setDescription('وصف القالب'))
+             .addStringOption(o => o.setName('type').setDescription('نوع الإجازة').setRequired(true)
+               .addChoices(...Object.entries(LEAVE_TYPES).map(([v, n]) => ({ name: `${LEAVE_RULES[v]?.emoji || '🏖️'} ${n}`, value: v }))))
+             .addIntegerOption(o => o.setName('duration').setDescription('المدة الافتراضية بالأيام'))
+             .addStringOption(o => o.setName('reason').setDescription('السبب الافتراضي'))
+             .addBooleanOption(o => o.setName('public').setdescription('قالب عام للجميع'))
+         )
+         .addSubcommand(sub =>
+           sub.setName('use')
+             .setDescription('استخدام قالب إجازة لإنشاء طلب جديد')
+             .addStringOption(o => o.setName('id').setdescription('معرف القالب').setRequired(true))
+             .addStringOption(o => o.setName('reason').setDescription('السبب (يOverride الافتراضي)')
+             .addIntegerOption(o => o.setName('duration').setDescription('المدة بالأيام (يOverride الافتراضي)'))
+         )
+       },
+   ],
 
   components: {
     'leave:modal': async (i, [type]) => {

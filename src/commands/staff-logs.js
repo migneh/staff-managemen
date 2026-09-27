@@ -14,8 +14,8 @@ module.exports = {
         .addStringOption(o => o.setName('action').setDescription('تصفية حسب الإجراء (مثل: staff_warning_issued, task_assigned)'))
         .addStringOption(o => o.setName('user').setDescription('تصفية حسب المستخدم (معرف أو منشن)'))
         .addStringOption(o => o.setName('limit').setDescription('عدد السجلات (الافتراضي: 20, الأقصى: 100)'))
-        .addStringOption(o => o.setName('days').set_description('عدد الأيام السابقة (الافتراضي: 7)'))
-        .addBooleanOption(o => o.setName('detailed').set_description('عرض تفاصيل JSON complète')),
+        .addStringOption(o => o.setName('days').setDescription('عدد الأيام السابقة (الافتراضي: 7)'))
+        .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفاصيل JSON complète')),
       level: LEVELS.STAFF,
       async execute(i) {
         const actionFilter = i.options.getString('action');
