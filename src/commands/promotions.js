@@ -163,11 +163,14 @@ module.exports = {
       return log(i.client, '📈 ترقية', `<@${r.user_id}>: ${rule.from} → ${rule.to} بواسطة <@${i.user.id}>${rolesOk ? '' : '\n⚠️ لم يتم تعديل الرتب تلقائياً — عدّلها يدوياً'}`, COLORS.success);
     },
     'promo:reject': async (i, [id]) => {
+      const r = promo.getRequest(Number(id));
+      if (r && r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك رفض طلب ترقيتك الخاص.', COLORS.danger);
       return forms.open(i, modals.reject({ id }));
     },
     'promo:rejectmodal': async (i, [id]) => {
       const r = promo.getRequest(Number(id));
       if (!r || r.status !== 'pending') return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
+      if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك رفض طلب ترقيتك الخاص.', COLORS.danger);
       const reason = forms.combine(i);
       if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب سبباً مخصصاً قبل الإرسال.', COLORS.danger);
       audit.record({ action: 'promotion_rejected', actorId: i.user.id, targetId: r.user_id, details: { requestId: r.id, reason }, channelId: i.channelId });

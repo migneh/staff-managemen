@@ -48,6 +48,12 @@ const reviewRow = (id) => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId(`resign:interview:${id}`).setLabel('مقابلة خروج').setEmoji('📝').setStyle(ButtonStyle.Secondary),
 );
 
+/** يمنع اتخاذ أي إجراء مراجعة على طلب استقالة نفسك — يعيد رسالة الرفض أو null إن كان مسموحاً. */
+function selfReviewBlock(i, resignation) {
+  if (resignation && resignation.user_id === i.user.id) return '❌ لا يمكنك مراجعة طلب استقالتك الخاص. يجب أن يراجعه إداري آخر.';
+  return null;
+}
+
 async function fetchMember(i, userId) {
   try { return i.guild?.members?.fetch ? await i.guild.members.fetch(userId) : null; } catch { return null; }
 }
@@ -68,6 +74,8 @@ async function decide(i, id, status) {
   const db = getDb();
   const r = db.prepare('SELECT * FROM resignations WHERE id = ?').get(Number(id));
   if (!r || !['pending', 'on_hold'].includes(r.status)) return replyEphemeral(i, '❌ الطلب غير موجود أو تمت مراجعته.', COLORS.danger);
+  // منع اتخاذ قرار على استقالة نفسك — حتى Boss لا يمكنه قبول/رفض استقالته الخاصة.
+  if (r.user_id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك اتخاذ قرار بشأن طلب استقالتك الخاص. يجب أن يراجعه إداري آخر.', COLORS.danger);
   const reason = i.fields ? (forms.combine(i) || null) : null;
   const exitInterview = i.fields && i.fields.fields?.has?.('exit_interview') ? (i.fields.getTextInputValue('exit_interview') || '').trim() || null : null;
 
@@ -394,16 +402,22 @@ module.exports = {
     },
     'resign:accept': async (i, [id]) => {
       if (i.staffLevel < LEVELS.BOSS) return replyEphemeral(i, '❌ قبول الاستقالة من صلاحية Boss فقط.', COLORS.danger);
+      const block = selfReviewBlock(i, getDb().prepare('SELECT user_id FROM resignations WHERE id=?').get(Number(id)));
+      if (block) return replyEphemeral(i, block, COLORS.danger);
       return forms.open(i, modals.decide({ id, action: 'accept' }));
     },
     'resign:acceptmodal': async (i, [id]) => { if (i.staffLevel < LEVELS.BOSS) return replyEphemeral(i, '❌ Boss فقط.', COLORS.danger); return decide(i, id, 'accepted'); },
     'resign:reject': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
+      const block = selfReviewBlock(i, getDb().prepare('SELECT user_id FROM resignations WHERE id=?').get(Number(id)));
+      if (block) return replyEphemeral(i, block, COLORS.danger);
       return forms.open(i, modals.decide({ id, action: 'reject' }));
     },
     'resign:rejectmodal': async (i, [id]) => { if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger); return decide(i, id, 'rejected'); },
     'resign:hold': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
+      const block = selfReviewBlock(i, getDb().prepare('SELECT user_id FROM resignations WHERE id=?').get(Number(id)));
+      if (block) return replyEphemeral(i, block, COLORS.danger);
       return forms.open(i, modals.decide({ id, action: 'hold' }));
     },
     'resign:holdmodal': async (i, [id]) => { if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger); return decide(i, id, 'on_hold'); },
@@ -411,10 +425,15 @@ module.exports = {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
       const r = getDb().prepare('SELECT * FROM resignations WHERE id=?').get(Number(id));
       if (!r) return replyEphemeral(i, '❌ الطلب غير موجود.', COLORS.danger);
+      const block = selfReviewBlock(i, r);
+      if (block) return replyEphemeral(i, block, COLORS.danger);
       return forms.open(i, modals.interview({ id }), { values: { exit_interview: r.exit_interview } });
     },
     'resign:interviewmodal': async (i, [id]) => {
       if (i.staffLevel < LEVELS.MANAGEMENT) return replyEphemeral(i, '❌ لا تملك الصلاحية.', COLORS.danger);
+      const target = getDb().prepare('SELECT user_id FROM resignations WHERE id=?').get(Number(id));
+      const block = selfReviewBlock(i, target);
+      if (block) return replyEphemeral(i, block, COLORS.danger);
       const text = i.fields.getTextInputValue('exit_interview').trim();
       getDb().prepare('UPDATE resignations SET exit_interview=? WHERE id=?').run(text, Number(id));
       const updated = getDb().prepare('SELECT * FROM resignations WHERE id=?').get(Number(id));

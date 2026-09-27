@@ -231,7 +231,14 @@ module.exports = {
         const user = i.options.getUser('user');
         const s = staffService.get(user.id);
         if (!s) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
+        // هذا التقييم يدخل مباشرة في حساب Score — لا يمكن للمشرف تقييم نفسه لرفع رصيده.
+        if (user.id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك تقييم نفسك.', COLORS.danger);
         const factor = i.options.getString('factor');
+        // دفاع إضافي: factor يُستخدم كاسم عمود في تحديث SQL ديناميكي — يُقيَّد بقائمة صريحة
+        // حتى مع ضمان Discord لقيم addChoices، لمنع أي حقن لو تغيّر مصدر القيمة مستقبلاً.
+        if (!['supervisor_rating', 'team_interaction', 'response_speed'].includes(factor)) {
+          return replyEphemeral(i, '❌ عامل تقييم غير صحيح.', COLORS.danger);
+        }
         staffService.update(user.id, { [factor]: Number(i.options.getString('grade')), human_ratings_at: nowIso() });
         return replyEphemeral(i, `✅ تم تحديث التقييم لـ <@${user.id}>.`, COLORS.success);
       },

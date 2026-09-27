@@ -45,10 +45,7 @@ const modules = [
  * guarded        : true يعني أن المعالج يفحص الصلاحية داخلياً ويجب تركه (توثيق)
  */
 const COMPONENT_ACCESS = {
-  'templates:list': { level: LEVELS.STAFF, owner: 'self' },
-  'templates:create': { level: LEVELS.STAFF, owner: 'self' },
-  'templates:use': { level: LEVELS.STAFF, owner: 'self' },
-  'staff-logs:page': { level: LEVELS.STAFF },
+  'staff-logs:page': { level: LEVELS.MANAGEMENT },
   'mission:complete': { level: LEVELS.STAFF, owner: 'self' },
   'mission:cancel': { level: LEVELS.MANAGEMENT, guarded: true },
   'onboarding:complete': { level: LEVELS.STAFF, owner: 'self' },
@@ -178,15 +175,15 @@ const COMPONENT_ACCESS = {
   // ===== الترقيات =====
   'promo:modal': { level: LEVELS.STAFF, owner: 'self' },
   'promo:approve': { level: LEVELS.MANAGEMENT, guarded: true },
-  'promo:reject': { level: LEVELS.MANAGEMENT },        // كان بلا فحص نهائياً
-  'promo:rejectmodal': { level: LEVELS.MANAGEMENT },   // وكان يمنح تبريد 30 يوماً لأي عضو
+  'promo:reject': { level: LEVELS.MANAGEMENT, guarded: true },        // أُضيف فحص عدم رفض الطلب الذاتي
+  'promo:rejectmodal': { level: LEVELS.MANAGEMENT, guarded: true },   // وأُضيف نفس الفحص هنا
 
   // ===== الاستئنافات والتقدير والمهام والسجل =====
   'appeal:approve': { level: LEVELS.MANAGEMENT, guarded: true },
   'appeal:reject': { level: LEVELS.MANAGEMENT, guarded: true },
   'recognition:approve': { level: LEVELS.MANAGEMENT, guarded: true },
   'recognition:reject': { level: LEVELS.MANAGEMENT, guarded: true },
-  'score:weightsmodal': { level: LEVELS.MANAGEMENT, guarded: true },
+  'score:weightsmodal': { level: LEVELS.BOSS, guarded: true }, // يطابق شرط أمر /score-weights set (كان MANAGEMENT فقط)
   'task:page': { level: LEVELS.STAFF, owner: 'self' },
   'task:complete': { level: LEVELS.STAFF, owner: 'self' },
 

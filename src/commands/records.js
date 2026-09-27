@@ -59,6 +59,8 @@ module.exports = {
         const secret = i.options.getBoolean('secret') ? 1 : 0;
         const target = staffService.get(user.id);
         if (!target) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
+        // ملاحظة إيجابية تمنح +5 في الحساب — لا يمكن للإداري تسجيلها على نفسه.
+        if (user.id === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إضافة ملاحظة على نفسك.', COLORS.danger);
         const res = getDb().prepare('INSERT INTO staff_notes (user_id, note_type, content, is_secret, added_by) VALUES (?, ?, ?, ?, ?)').run(user.id, type, content, secret, i.user.id);
         audit.record({ action: 'staff_note_added', actorId: i.user.id, targetId: user.id, details: { type, secret: !!secret, rowId: res.lastInsertRowid }, channelId: i.channelId });
         const def = NOTE_TYPES[type];

@@ -1,4 +1,5 @@
 'use strict';
+const { randomBytes } = require('node:crypto');
 const forms = require('../ui/forms');
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, UserSelectMenuBuilder } = require('discord.js');
 const { LEVELS, WARNING_TYPES, NOTE_TYPES, STATUS } = require('../constants');
@@ -124,6 +125,7 @@ module.exports = {
             { name: '🔴 إنذار أخير (-20 نقطة + إيقاف)', value: 'final' }
           )),
       level: LEVELS.SUPERVISOR,
+      team: 'moderation',
       async execute(i) {
         if (!settings.featureToggle('punishmentSystem')) return replyEphemeral(i, '❌ نظام العقوبات معطّل حالياً.', COLORS.danger);
         const user = i.options.getUser('user');
@@ -135,7 +137,7 @@ module.exports = {
         const def = WARNING_TYPES[type];
         if (i.staffLevel < def.minLevel) return replyEphemeral(i, `❌ ${def.label} يتطلب صلاحية أعلى.`, COLORS.danger);
         
-        return forms.open(i, { ...modals.warning({ type }), title: `⚠️ تسجيل إنذار: ${def.label}` });
+        return forms.open(i, modals.warning({ type }), { title: `⚠️ تسجيل إنذار: ${def.label}`, values: { target: user.id } });
       },
     },
     {
@@ -147,6 +149,7 @@ module.exports = {
             { name: '🟡 ملاحظة سلبية (-10 نقطة)', value: 'negative' }
           )),
       level: LEVELS.SUPERVISOR,
+      team: 'moderation',
       async execute(i) {
         if (!settings.featureToggle('punishmentSystem')) return replyEphemeral(i, '❌ نظام العقوبات معطّل حالياً.', COLORS.danger);
         const user = i.options.getUser('user');
@@ -158,36 +161,62 @@ module.exports = {
         const def = NOTE_TYPES[type];
         if (i.staffLevel < def.minLevel) return replyEphemeral(i, `❌ ${def.label} يتطلب صلاحية أعلى.`, COLORS.danger);
         
-        return forms.open(i, { ...modals.note({ type }), title: `📝 تسجيل ملاحظة: ${def.label}` });
+        return forms.open(i, modals.note({ type }), { title: `📝 تسجيل ملاحظة: ${def.label}`, values: { target: user.id } });
       },
     },
   ],
 
   components: {
-    'punish:warning': async (i) => {
-      const type = i.values[0];
-      if (!WARNING_TYPES[type]) return replyEphemeral(i, '❌ نوع الإنذار غير صحيح.', COLORS.danger);
-      return forms.open(i, modals.warning({ type }));
+    // معالجة إرسال نموذج /warn: يقرأ العضو والسبب من النموذج ثم يعرض بطاقة تأكيد — لا يُكتب شيء في السجل بعد.
+    'punish:warning': async (i, [type]) => {
+      const def = WARNING_TYPES[type];
+      if (!def) return replyEphemeral(i, '❌ نوع الإنذار غير صحيح.', COLORS.danger);
+      const target = forms.value(i, 'target');
+      if (!ID_RE.test(target)) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. اختر العضو من قائمة النموذج.', COLORS.danger);
+      if (target === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إنذار نفسك.', COLORS.danger);
+      if (!staffService.get(target)) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
+      if ((i.staffLevel || 0) < def.minLevel) return replyEphemeral(i, `❌ ${def.label} يتطلب صلاحية أعلى.`, COLORS.danger);
+      const presets = forms.value(i, 'preset');
+      const presetReason = forms.value(i, 'reason');
+      const reason = forms.combine(i, { select: 'preset', text: 'reason' });
+      if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب تفاصيل السبب قبل المتابعة.', COLORS.danger);
+      const token = randomBytes(8).toString('hex');
+      const draft = { token, type, target, reason, presets, presetReason, owner: i.user.id, actorId: i.user.id, guild: i.guildId, expires: Date.now() + DRAFT_TTL };
+      rememberDraft(draft);
+      return i.reply({ embeds: [warningCard(draft, { pending: true })], components: [warningButtons(token)], ephemeral: true });
     },
-    
-    'punish:note': async (i) => {
-      const type = i.values[0];
-      if (!NOTE_TYPES[type]) return replyEphemeral(i, '❌ نوع الملاحظة غير صحيح.', COLORS.danger);
-      return forms.open(i, modals.note({ type }));
+
+    // معالجة إرسال نموذج /note: نفس فكرة التأكيد قبل الكتابة.
+    'punish:note': async (i, [type]) => {
+      const def = NOTE_TYPES[type];
+      if (!def) return replyEphemeral(i, '❌ نوع الملاحظة غير صحيح.', COLORS.danger);
+      const target = forms.value(i, 'target');
+      if (!ID_RE.test(target)) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. اختر العضو من قائمة النموذج.', COLORS.danger);
+      if (target === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إضافة ملاحظة على نفسك.', COLORS.danger);
+      if (!staffService.get(target)) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
+      if ((i.staffLevel || 0) < def.minLevel) return replyEphemeral(i, `❌ ${def.label} يتطلب صلاحية أعلى.`, COLORS.danger);
+      const content = forms.value(i, 'content');
+      const isSecret = forms.value(i, 'secret') === 'true';
+      if (!content) return replyEphemeral(i, 'اكتب محتوى الملاحظة قبل المتابعة.', COLORS.danger);
+      const token = randomBytes(8).toString('hex');
+      const draft = { token, type, target, content, is_secret: isSecret, owner: i.user.id, actorId: i.user.id, guild: i.guildId, expires: Date.now() + DRAFT_TTL };
+      rememberDraft(draft);
+      return i.reply({ embeds: [noteCard(draft, { pending: true })], components: [noteButtons(token)], ephemeral: true });
     },
 
     'punish:warningok': async (i, [token]) => {
       const draft = getDraft(i, token);
       if (!draft) return replyEphemeral(i, '⌛ انتهت صلاحية هذه البطاقة. أعد تنفيذ **/warn** من جديد.', COLORS.warning);
       drafts.delete(token);
-      
-      const target = forms.value(i, 'target');
-      const presets = forms.value(i, 'preset').split(/\s*[,،]\s*/).filter(Boolean);
-      const reason = forms.combine(i, { select: 'preset', text: 'reason' });
-      if (!ID_RE.test(target)) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. اختر العضو من قائمة النموذج.', COLORS.danger);
-      if (!reason) return replyEphemeral(i, 'اختر سبباً جاهزاً أو اكتب تفاصيل السبب قبل المتابعة.', COLORS.danger);
-      
-const def = WARNING_TYPES[draft.type];
+
+      // القيم جاءت من نموذج /warn وقت الإنشاء — هذا التفاعل زر تأكيد وليس نموذجاً، فلا يملك i.fields.
+      const { target, reason } = draft;
+      if (!ID_RE.test(target || '')) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. أعد تنفيذ /warn.', COLORS.danger);
+      if (!reason) return replyEphemeral(i, '❌ تعذّر استرجاع السبب. أعد تنفيذ /warn.', COLORS.danger);
+      if (target === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إنذار نفسك.', COLORS.danger);
+      if (!staffService.get(target)) return replyEphemeral(i, '❌ هذا العضو لم يعد مسجلاً كإداري.', COLORS.danger);
+
+      const def = WARNING_TYPES[draft.type];
       const db = getDb();
       const res = db.prepare('INSERT INTO warnings (user_id, warning_type, reason, issued_by) VALUES (?, ?, ?, ?)')
         .run(draft.target, draft.type, reason, i.user.id);
@@ -245,13 +274,15 @@ const def = WARNING_TYPES[draft.type];
       const draft = getDraft(i, token);
       if (!draft) return replyEphemeral(i, '⌛ انتهت صلاحية هذه البطاقة. أعد تنفيذ **/note** من جديد.', COLORS.warning);
       drafts.delete(token);
-      
-      const target = forms.value(i, 'target');
-      const content = forms.value(i, 'content');
-      const isSecret = forms.value(i, 'secret') === 'true';
-      if (!ID_RE.test(target)) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. اختر العضو من قائمة النموذج.', COLORS.danger);
-      if (!content) return replyEphemeral(i, 'اكتب محتوى الملاحظة قبل المتابعة.', COLORS.danger);
-      
+
+      // القيم جاءت من نموذج /note وقت الإنشاء — هذا التفاعل زر تأكيد وليس نموذجاً، فلا يملك i.fields.
+      const { target, content } = draft;
+      const isSecret = !!draft.is_secret;
+      if (!ID_RE.test(target || '')) return replyEphemeral(i, '❌ لم يُحدَّد العضو بشكل صحيح. أعد تنفيذ /note.', COLORS.danger);
+      if (!content) return replyEphemeral(i, '❌ تعذّر استرجاع نص الملاحظة. أعد تنفيذ /note.', COLORS.danger);
+      if (target === i.user.id) return replyEphemeral(i, '❌ لا يمكنك إضافة ملاحظة على نفسك.', COLORS.danger);
+      if (!staffService.get(target)) return replyEphemeral(i, '❌ هذا العضو لم يعد مسجلاً كإداري.', COLORS.danger);
+
       const def = NOTE_TYPES[draft.type];
       const db = getDb();
       const res = db.prepare('INSERT INTO staff_notes (user_id, note_type, content, is_secret, added_by) VALUES (?, ?, ?, ?, ?)')

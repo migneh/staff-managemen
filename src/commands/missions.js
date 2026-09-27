@@ -214,9 +214,10 @@ async function createMission(i) {
   const userId = targetUser ? targetUser.id : i.user.id;
   
   // التحقق من الصلاحية لإنشاء مهمة لغيرك
+  // ملاحظة: صفوف staff_members لا تملك حقل "level" رقمياً (كانت المقارنة دائماً false
+  // فتمنع حتى المدراء من إنشاء مهام لغيرهم) — المستوى الصحيح للمستخدم الحالي هو i.staffLevel.
   if (targetUser && targetUser.id !== i.user.id) {
-    const member = staffService.get(i.user.id);
-    if (!member || ![LEVELS.MANAGEMENT, LEVELS.BOSS].includes(member.level)) {
+    if (!(i.staffLevel >= LEVELS.MANAGEMENT)) {
       return replyEphemeral(i, '❌ ليس لديك صلاحية لإنشاء مهمة لغيرك.', COLORS.danger);
     }
   }
@@ -265,9 +266,8 @@ async function createTeamMission(i) {
   
   if (!title) return replyEphemeral(i, '❌ يجب إدخال عنوان المهمة.', COLORS.danger);
   
-  // التحقق من الصلاحية
-  const member = staffService.get(i.user.id);
-  if (!member || ![LEVELS.MANAGEMENT, LEVELS.BOSS].includes(member.level)) {
+  // التحقق من الصلاحية (staff_members لا يملك حقل level رقمياً — نستخدم i.staffLevel المحسوب مسبقاً)
+  if (!(i.staffLevel >= LEVELS.MANAGEMENT)) {
     return replyEphemeral(i, '❌ ليس لديك صلاحية لإنشاء مهمة جماعية.', COLORS.danger);
   }
   
