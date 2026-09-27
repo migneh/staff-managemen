@@ -184,6 +184,7 @@ module.exports = {
       .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر (افتراضياً: مختصر)')),
       level: LEVELS.STAFF,
       async execute(i) {
+        if (!settings.featureToggle('pointsHistoryCommands')) return replyEphemeral(i, '❌ أوامر تاريخ النقاط معطّلة حالياً.', COLORS.danger);
         const detailed = i.options.getBoolean('detailed') || false;
         const rows = staffService.all().map(m => ({ ...m, total: points.total(m.user_id) }));
         const mine = rows.find(r => r.user_id === i.user.id);
@@ -224,6 +225,7 @@ module.exports = {
       .addBooleanOption(o => o.setName('show-epochs').setDescription('عرض عصر النقاط لكل حركة')),
       level: LEVELS.STAFF,
       async execute(i) {
+        if (!settings.featureToggle('pointsHistoryCommands')) return replyEphemeral(i, '❌ أوامر تاريخ النقاط معطّلة حالياً.', COLORS.danger);
         const categoryFilter = i.options.getString('category') || 'all';
         const days = i.options.getInteger('days') || 30;
         const onlyCurrentEpoch = i.options.getBoolean('only-current-epoch') !== false;

@@ -11,28 +11,28 @@ const { embed, COLORS, divider, arDigits } = require('../utils');
 const kit = require('../ui/kit');
 
 const JOB_LABELS = {
-   absence: 'فحص الغياب',
-   suspensions: 'رفع الإيقاف المنتهي',
-   leaves: 'الإجازات',
-   resignations: 'الاستقالات',
-   'task-reminders': 'تذكيرات المهام',
-   backup: 'النسخ الاحتياطي',
-   'daily-report': 'التقرير اليومي',
-   'weekly-report': 'التقرير الأسبوعي',
-   'monthly-report': 'التقرير الشهري',
-   maintenance: 'صيانة البيانات',
- };
+  absence: 'فحص الغياب',
+  suspensions: 'رفع الإيقاف المنتهي',
+  leaves: 'الإجازات',
+  resignations: 'الاستقالات',
+  'task-reminders': 'تذكيرات المهام',
+  backup: 'النسخ الاحتياطي',
+  'daily-report': 'التقرير اليومي',
+  'weekly-report': 'التقرير الأسبوعي',
+  'monthly-report': 'التقرير الشهري',
+  maintenance: 'صيانة البيانات',
+};
 
- /** صحة النظام: آخر تشغيل لكل مهمة + قاعدة البيانات + آخر نسخة احتياطية */
- module.exports = {
-   commands: [
-     {
-       data: new SlashCommandBuilder().setName('system-status').setDescription('صحة البوت: المهام المجدولة، قاعدة البيانات، آخر نسخة احتياطية')
-         .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر لقاعدة البيانات')),
-       level: LEVELS.STAFF, serverManagerOnly: true,
-       async execute(i) {
-         const detailed = i.options.getBoolean('detailed') || false;
-         if (detailed && !settings.featureToggle('detailedSystemStatus')) return replyEphemeral(i, '❌ هذا الوضع التفصيلي معطّل حالياً.', COLORS.danger);
+/** صحة النظام: آخر تشغيل لكل مهمة + قاعدة البيانات + آخر نسخة احتياطية */
+module.exports = {
+  commands: [
+    {
+      data: new SlashCommandBuilder().setName('system-status').setDescription('صحة البوت: المهام المجدولة، قاعدة البيانات، آخر نسخة احتياطية')
+        .addBooleanOption(o => o.setName('detailed').setDescription('عرض تفصيلي أكثر لقاعدة البيانات')),
+      level: LEVELS.STAFF, serverManagerOnly: true,
+      async execute(i) {
+        const detailed = i.options.getBoolean('detailed') || false;
+        if (detailed && !settings.featureToggle('detailedSystemStatus')) return replyEphemeral(i, '❌ هذا الوضع التفصيلي معطّل حالياً.', COLORS.danger);
         const runs = scheduler.status();
         const jobs = scheduler.JOBS || [];
         const lines = jobs.map(j => {

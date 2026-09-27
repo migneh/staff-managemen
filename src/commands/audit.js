@@ -61,7 +61,7 @@ module.exports = {
         }
         
         // Create CSV content
-        let csvContent = 'ID,الecedence,المنفذ,الهدف,التفاصيل,تاريخ الإنشاء\n';
+        let csvContent = 'ID,الإجراء,المنفذ,الهدف,التفاصيل,تاريخ الإنشاء\n';
         filteredData.forEach(row => {
           const actorName = row.actor_id ? `<@${row.actor_id}>` : 'النظام';
           const targetName = row.target_id ? `<@${row.target_id}>` : '';
