@@ -8,6 +8,7 @@ const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = re
 const points = require('../services/points');
 const staffService = require('../services/staff');
 const audit = require('../services/audit');
+const settings = require('../services/settings');
 const { LEVELS, STATUS, POINTS } = require('../constants');
 const kit = require('../ui/kit');
 const { COLORS, replyEphemeral, dm, log, arDigits, truncate } = require('../utils');
