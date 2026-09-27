@@ -15,13 +15,20 @@ const modules = [
   require('./recognition'),
   require('./promotions'),
   require('./reports'),
-  require('./points'),
   require('./ratings'),
   require('./tasks'),
   require('./audit'),
   require('./backup'),
   require('./governance'),
   require('./system'),
+  require('./punishments'),
+  require('./activity'),
+  require('./my-status'),
+  require('./promotion-progress'),
+  require('./config'),
+  require('./staff-logs'),  // New: Staff logs system
+  require('./missions'),    // New: Missions/Tasks system enhancement
+  require('./onboarding'),  // New: Enhanced onboarding system
 ];
 
 /**
@@ -176,24 +183,33 @@ const COMPONENT_ACCESS = {
   'task:page': { level: LEVELS.STAFF, owner: 'self' },
   'task:complete': { level: LEVELS.STAFF, owner: 'self' },
 
-  // ===== الردود الشخصية من /me و /help =====
-  'me:perf': { level: LEVELS.STAFF, owner: 'self' },
-  'me:record': { level: LEVELS.STAFF, owner: 'self' },
-  'me:promo': { level: LEVELS.STAFF, owner: 'self' },
-  'points:grantok': { level: LEVELS.MANAGEMENT, guarded: true },     // المنح اليدوي يتحقق من صاحب المنحة داخلياً
-  'points:grantcancel': { level: LEVELS.MANAGEMENT, guarded: true },
-  'points:contest': { level: LEVELS.STAFF, owner: 'self' },
-  'points:contestmodal': { level: LEVELS.STAFF, owner: 'self' },
-  'help:open': { level: LEVELS.STAFF },
-  'help:section': { level: LEVELS.STAFF },
-  'help:page': { level: LEVELS.STAFF },
-  'help:search': { level: LEVELS.STAFF },
-  'help:searchmodal': { level: LEVELS.STAFF },
-  'me:home': { level: LEVELS.STAFF, owner: 'self' },
-  'nav:configure': { level: LEVELS.STAFF, guarded: true },
-  'nav:action': { level: LEVELS.STAFF, guarded: true },
-  'nav:run': { level: LEVELS.STAFF, guarded: true },
-  'nav:choice': { level: LEVELS.STAFF, guarded: true },
+// ===== الردود الشخصية من /me و /help =====
+   'me:perf': { level: LEVELS.STAFF, owner: 'self' },
+   'me:record': { level: LEVELS.STAFF, owner: 'self' },
+   'me:promo': { level: LEVELS.STAFF, owner: 'self' },
+   'my-status': { level: LEVELS.STAFF, owner: 'self' },
+   'promotion-progress': { level: LEVELS.STAFF },
+   'activity': { level: LEVELS.STAFF },
+   'help:open': { level: LEVELS.STAFF },
+   'help:section': { level: LEVELS.STAFF },
+   'help:page': { level: LEVELS.STAFF },
+   'help:search': { level: LEVELS.STAFF },
+   'help:searchmodal': { level: LEVELS.STAFF },
+   'me:home': { level: LEVELS.STAFF, owner: 'self' },
+   'nav:configure': { level: LEVELS.STAFF, guarded: true },
+   'nav:action': { level: LEVELS.STAFF, guarded: true },
+   'nav:run': { level: LEVELS.STAFF, guarded: true },
+   'nav:choice': { level: LEVELS.STAFF, guarded: true },
+   
+   // ===== العقوبات والملاحظات =====
+   'punish:warning': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:warningok': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:warnedit': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:warningcancel': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:note': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:notekok': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:noteedit': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
+   'punish:notecancel': { level: LEVELS.SUPERVISOR, team: 'moderation', guarded: true },
 };
 
 const commands = new Map();

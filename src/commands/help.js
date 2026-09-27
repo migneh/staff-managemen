@@ -12,21 +12,20 @@ const modals = {
     title: '🔍 بحث عن أمر',
     fields: [forms.field({
       id: 'query', label: 'ما الذي تريد فعله؟', min: 2, max: 80,
-      description: 'اكتب كلمة من اسم الأمر أو وصفه: إجازة، مهام، نقاط، ترقية.',
-      placeholder: 'مثال: إجازة، مهام، نقاط',
+      description: 'اكتب كلمة من اسم الأمر أو وصفه: إجازة، مهام، ترقية.',
+      placeholder: 'مثال: إجازة، مهام، ترقية',
     })],
     note: 'البحث يعرض الأوامر المتاحة لك فقط حسب رتبتك وفريقك.',
   }),
 };
-const { tsRelative, tsDate } = require('../ui/kit');
+const { scoreEmoji, tsRelative, tsDate } = require('../ui/kit');
 const staffService = require('../services/staff');
 const reports = require('../services/reports');
 const promo = require('../services/promotions');
 const faq = require('../services/faq');
-const points = require('../services/points');
 const taskService = require('../services/tasks');
 const { getDb } = require('../database');
-const { userEmbed, COLORS, progressBar, scoreColor, scoreEmoji, hoursSince, replyEphemeral } = require('../utils');
+const { userEmbed, COLORS, progressBar, scoreColor, hoursSince, replyEphemeral } = require('../utils');
 
 function dashboard(i) {
   const s = staffService.get(i.user.id);
@@ -37,7 +36,6 @@ function dashboard(i) {
   const pendingLeave = db.prepare(`SELECT id FROM leave_requests WHERE user_id = ? AND status = 'pending'`).get(i.user.id);
   const pendingPromo = promo.pendingRequest(i.user.id);
   const pendingTasks = taskService.pendingCount(i.user.id);
-  const cd = points.activeCooldown(i.user.id);
   const h = hoursSince(s.last_activity);
   const trend = reports.personalTrend(s);
   const blocker = ev.checks.find(c => !c.pass);
@@ -54,7 +52,6 @@ function dashboard(i) {
   e.addFields(
     { name: '🎯 ابدأ بهذه الخطوة', value: alerts[0] || (blocker ? `للاقتراب من الترقية: **${blocker.label}** — الحالي ${blocker.actual} / المطلوب ${blocker.required}.` : '✅ لا توجد إجراءات عاجلة. يمكنك مراجعة أدائك أو تصفح المعرفة.') },
     { name: `${scoreEmoji(r.score)} درجة الأداء (Score)`, value: `**${r.score}/100** — ${r.grade}\n${progressBar(r.score, 100, 10)}`, inline: true },
-    { name: '🎯 نقاط الترقية', value: `**${r.points}**${ev.rule ? ` / ${ev.rule.points}` : ''}`, inline: true },
     { name: '📅 النشاط خلال ٣٠ يوماً', value: `**${r.raw.activeDays}** يوم${s.team === 'support' ? ` • **${r.raw.tickets}** تكت` : s.team === 'moderation' ? ` • **${r.raw.actions}** إجراء` : ''}`, inline: true },
     { name: '📊 مقارنة أسبوعية', value: `Score **${trend.currentScore}** • التغير **${trend.scoreDelta >= 0 ? '+' : ''}${trend.scoreDelta}** عن الأسبوع السابق.\nأيام النشاط: **${trend.currentActiveDays}** هذا الأسبوع / **${trend.previousActiveDays}** السابق.${trend.streakWeeks ? `\n🔥 ${trend.streakWeeks} أسبوع نشاط متواصل.` : ''}` },
   );
@@ -65,13 +62,12 @@ function dashboard(i) {
   const waiting = [];
   if (pendingLeave) waiting.push(`🏖️ إجازة #${pendingLeave.id} — بانتظار مراجعة الإدارة، لا يلزم طلب جديد.`);
   if (pendingPromo) waiting.push(`📈 ترقية #${pendingPromo.id} — بانتظار مراجعة الإدارة.`);
-  if (cd) waiting.push(`🧊 تجميد الترقية حتى ${tsDate(cd.until)}.`);
   if (alerts.length > 1) e.addFields({ name: '📌 تذكيرات أخرى', value: alerts.slice(1).join('\n') });
   if (waiting.length) e.addFields({ name: '⏳ قيد المتابعة', value: waiting.join('\n') });
   e.setFooter({ text: 'لوحة خاصة بك • التفاصيل في قائمة الإجراءات • استخدم تحديث لعرض آخر حالة' });
 
-  const context = accessContext(i);
-  const quick = quickRow(['my-ratings', 'my-performance', 'my-record', 'points-history', 'promotion-status', 'request-promotion', 'request-leave', 'my-leaves', 'leave-balance', 'my-resignations'], context, 'تقاريري وطلباتي…');
+const context = accessContext(i);
+   const quick = quickRow(['my-ratings', 'my-performance', 'my-record', 'promotion-status', 'request-promotion', 'request-leave', 'my-leaves', 'leave-balance', 'my-resignations'], context, 'تقاريري وطلباتي…');
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('nav:run:my-tasks').setLabel(pendingTasks ? `مهامي (${pendingTasks})` : 'مهامي').setEmoji('📋').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('faq:unread').setLabel(unread ? `للقراءة (${unread})` : 'غير المقروءة').setEmoji('📚').setStyle(ButtonStyle.Secondary),

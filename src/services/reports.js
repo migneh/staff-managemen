@@ -2,7 +2,6 @@
 const { getDb } = require('../database');
 const staffService = require('./staff');
 const score = require('./score');
-const points = require('./points');
 const { hoursSince } = require('../utils');
 const clock = require('../clock');
 const { LEVELS, INACTIVE_STATUSES } = require('../constants');
@@ -16,12 +15,11 @@ function individual(staff, days = 30) {
   const sc = score.compute(staff, raw);
   const warns = db.prepare(`SELECT warning_type, COUNT(*) c FROM warnings WHERE user_id = ? AND voided_at IS NULL AND created_at >= datetime('now', ?) GROUP BY warning_type`).all(staff.user_id, `-${days} days`);
   const absentDays = Math.max(0, days - raw.activeDays - raw.leaveDays);
-  return {
-    staff, raw, score: sc.score, factors: sc.factors, assessedMax: sc.assessedMax, grade: score.grade(sc.score),
-    points: points.total(staff.user_id),
-    warnings: warns, absentDays,
-    lastActivityHours: hoursSince(staff.last_activity),
-  };
+return {
+     staff, raw, score: sc.score, factors: sc.factors, assessedMax: sc.assessedMax, grade: score.grade(sc.score),
+     warnings: warns, absentDays,
+     lastActivityHours: hoursSince(staff.last_activity),
+   };
 }
 
 /** ملخص فريق */
@@ -76,7 +74,7 @@ function leaderboard(teamKey, days = 30, { includeProbation = false } = {}) {
       return { ...r, primary, qualified };
     });
 
-  const ranked = scored.filter(r => r.qualified).sort((a, b) => b.score - a.score || b.points - a.points || b.primary - a.primary);
+  const ranked = scored.filter(r => r.qualified).sort((a, b) => b.score - a.score || b.primary - a.primary);
   const unranked = scored.filter(r => !r.qualified).sort((a, b) => b.raw.activeDays - a.raw.activeDays);
   ranked.unranked = unranked; // يُقرأ في العرض دون كسر التوافق مع المستهلكين الحاليين
   return ranked;

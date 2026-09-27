@@ -479,19 +479,95 @@ async function syncVacationRole(member, date = today()) {
 }
 
 function markReminder(id, current, key) {
-  const sent = new Set(String(current || '').split(',').filter(Boolean));
-  if (sent.has(key)) return false;
-  sent.add(key);
-  getDb().prepare('UPDATE leave_requests SET reminders_sent = ? WHERE id = ?').run([...sent].join(','), id);
-  return true;
+   const sent = new Set(String(current || '').split(',').filter(Boolean));
+   if (sent.has(key)) return false;
+   sent.add(key);
+   getDb().prepare('UPDATE leave_requests SET reminders_sent = ? WHERE id = ?').run([...sent].join(','), id);
+   return true;
+}
+
+/**
+ * إنشاء قالب إجازة جديد
+ */
+function createLeaveTemplate({ id, userId, name, description, leaveType, defaultDuration, defaultReason, isPublic = 0 }) {
+   const db = getDb();
+   const result = db.prepare(`
+      INSERT INTO leave_templates (id, user_id, name, description, leave_type, default_duration, default_reason, is_public, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+   `).run(id, userId, name, description, leaveType, defaultDuration, defaultReason, isPublic);
+   
+   return result.changes > 0 ? getLeaveTemplate(id) : null;
+}
+
+/**
+ * الحصول على قالب إجازة بالمعرف
+ */
+function getLeaveTemplate(id) {
+   return getDb().prepare('SELECT * FROM leave_templates WHERE id = ?').get(id) || null;
+}
+
+/**
+ * قائمة قوالب الإجازات لمستخدم معين (أو القوالب العامة إذا لم يحدد المستخدم)
+ */
+function listLeaveTemplates({ userId = null, includePublic = true } = {}) {
+   let sql = 'SELECT * FROM leave_templates WHERE 1=1';
+   const params = [];
+   
+   if (userId) {
+      sql += ' AND user_id = ?';
+      params.push(userId);
+   } else if (includePublic) {
+      sql += ' AND is_public = 1';
+   }
+   
+   sql += ' ORDER BY name';
+   return getDb().prepare(sql).all(...params);
+}
+
+/**
+ * حذف قالب إجازة
+ */
+function deleteLeaveTemplate(id, userId) {
+   const db = getDb();
+   const result = db.prepare('DELETE FROM leave_templates WHERE id = ? AND user_id = ?').run(id, userId);
+   return result.changes > 0;
+}
+
+/**
+ * استخدام قالب إجازة لإنشاء طلب إجازة جديد (يعيد بيانات الطلب المعبأ مسبقاً)
+ */
+function useLeaveTemplate(templateId, userId, overrides = {}) {
+   const template = getLeaveTemplate(templateId);
+   if (!template) return null;
+   
+   // التحقق من الصلاحية: إما أن يكون القالب خاصاً للمستخدم أو عاماً
+   if (template.user_id !== userId && template.is_public !== 1) {
+      return null;
+   }
+   
+   return {
+      id: template.id,
+      user_id: userId,
+      name: template.name,
+      description: template.description,
+      leave_type: overrides.leave_type || template.leave_type,
+      start_date: overrides.start_date || null, // سيحتاج المستخدم لتحديد التواريخ
+      end_date: overrides.end_date || null,     // سيحتاج المستخدم لتحديد التواريخ
+      reason: overrides.reason || template.default_reason,
+      duration_days: overrides.duration_days || template.default_duration,
+      is_public: 0, // الطلبات الجديدة تكون خاصة دائماً
+      created_at: null,
+      updated_at: null
+   };
 }
 
 module.exports = {
-  concurrentApproved, userHasOverlap, approvedForUser, activeForUser, pendingForUser, get, list,
-  hasApprovedCover, syncVacationRole, markReminder,
-  durationDays, noticeHours, daysInRangeForUser, minGapViolated, validate, previewRequest,
-  spanDays, countedDays, skippedOffDays, weeklyOffDays, offDaysLabel,
-  usageInRange, annualUsage, allowance, teamCoverage, teamImpact, memberHistory,
-  suggestRequest, acceptSuggestion, declineSuggestion, clearSuggestion,
-  coverageFor, coverageBetween, createRequest, extendRequest,
+   concurrentApproved, userHasOverlap, approvedForUser, activeForUser, pendingForUser, get, list,
+   hasApprovedCover, syncVacationRole, markReminder,
+   durationDays, noticeHours, daysInRangeForUser, minGapViolated, validate, previewRequest,
+   spanDays, countedDays, skippedOffDays, weeklyOffDays, offDaysLabel,
+   usageInRange, annualUsage, allowance, teamCoverage, teamImpact, memberHistory,
+   suggestRequest, acceptSuggestion, declineSuggestion, clearSuggestion,
+   coverageFor, coverageBetween, createRequest, extendRequest,
+   createLeaveTemplate, getLeaveTemplate, listLeaveTemplates, deleteLeaveTemplate, useLeaveTemplate,
 };

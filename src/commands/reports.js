@@ -5,13 +5,13 @@ const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Attac
 const { LEVELS, TEAMS, STATUS, WARNING_TYPES } = require('../constants');
 const reports = require('../services/reports');
 const load = require('../services/load');
-const points = require('../services/points');
 const staffService = require('../services/staff');
 const taskService = require('../services/tasks');
 const settings = require('../services/settings');
 const audit = require('../services/audit');
 const { getDb } = require('../database');
 const { embed, COLORS, replyEphemeral, progressBar, scoreColor, scoreEmoji, divider, nowIso } = require('../utils');
+const kit = require('../ui/kit');
 const { LEADERBOARD_MIN_ACTIVE_DAYS } = require('../services/reports');
 
 /** النافذة الموحّدة للترتيب — أسبوعان أعدل من 7 أيام في الفرق الصغيرة */
@@ -29,11 +29,10 @@ function performanceEmbed(r) {
     ...(raw.weightedMessages != null ? [{ name: '📡 وزن النشاط', value: `${raw.messages} رسالة → وزن ${Math.round(raw.weightedMessages)}`, inline: true }] : []),
     { name: '🚫 أيام الغياب', value: `${r.absentDays}`, inline: true },
     { name: '🏖️ أيام الإجازة', value: `${raw.leaveDays}`, inline: true },
-    { name: '⚠️ الإنذارات', value: r.warnings.length ? r.warnings.map(w => `${WARNING_TYPES[w.warning_type]?.label}: ${w.c}`).join(' • ') : 'لا يوجد', inline: true },
-    ...(r.assessedMax != null && r.assessedMax < 100 ? [{ name: '🧮 كيف حُسب Score', value: `المقياس يُحتسب على **${r.assessedMax}** نقطة فقط (تُستثنى العوامل غير المُقيَّمة) ثم يُوحَّد إلى 100 — فلا تُمنح نقاط مقابل شيء لم يُقيَّم.` }] : []),
-    { name: '📝 الملاحظات', value: `🟢 ${raw.positiveNotes} • 🟡 ${raw.negativeNotes}`, inline: true },
-    { name: '🎯 نقاط الترقية', value: `${r.points}`, inline: true },
-  );
+{ name: '⚠️ الإنذارات', value: r.warnings.length ? r.warnings.map(w => `${WARNING_TYPES[w.warning_type]?.label}: ${w.c}`).join(' • ') : 'لا يوجد', inline: true },
+     ...(r.assessedMax != null && r.assessedMax < 100 ? [{ name: '🧮 كيف حُسب Score', value: `المقياس يُحتسب على **${r.assessedMax}** نقطة فقط (تُستثنى العوامل غير المُقيَّمة) ثم يُوحَّد إلى 100 — فلا تُمنح نقاط مقابل شيء لم يُقيَّم.` }] : []),
+     { name: '📝 الملاحظات', value: `🟢 ${raw.positiveNotes} • 🟡 ${raw.negativeNotes}`, inline: true },
+   );
   if (staff.status === 'on_leave') e.setFooter({ text: 'معذور — بإجازة معتمدة (Score مجمّد)' });
   return e;
 }
@@ -43,7 +42,7 @@ function leaderboardEmbed(rows, title, days = LEADERBOARD_WINDOW_DAYS) {
   if (!rows.length && !unranked.length) return embed(title, 'لا يوجد إداريون مؤهلون للترتيب.', COLORS.gray);
   const medals = ['🥇', '🥈', '🥉'];
   const body = rows.length
-    ? rows.slice(0, 20).map((r, idx) => `${medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`} • 🎯 ${r.points}`).join('\n')
+    ? rows.slice(0, 20).map((r, idx) => `${medals[idx] || `\`${String(idx + 1).padStart(2, ' ')}\``} ${scoreEmoji(r.score)} **${r.score}** ${progressBar(r.score, 100, 8)} <@${r.staff.user_id}>\n╰ ${r.staff.rank} • ${r.staff.team === 'support' ? `🎫 ${r.raw.tickets}` : `🛡️ ${r.raw.actions}`}').join('\n')
     : '_لا أحد بلغ الحد الأدنى للمشاركة._';
   const footer = `النافذة: آخر ${days} يوم • بلا حد أدنى للمشاركة: ${unranked.length} • Boss والمجازون مستبعدون`;
   return embed(title, body, COLORS.primary)
@@ -62,24 +61,7 @@ function teamEmbed(teamKey, rows) {
   for (let k = 0; k < lines.length; k += 15) e.addFields({ name: k === 0 ? 'الأعضاء' : '\u200b', value: lines.slice(k, k + 15).join('\n') });
   return e;
 }
-
-function pointsCsv(rows) {
-  const cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-  const header = ['id', 'created_at', 'points', 'reason', 'reason_key', 'rank_epoch', 'counts_in_current_rank', 'reference', 'added_by'];
-  const lines = rows.map(r => [r.id, r.created_at, r.points, r.reason, r.reason_key, r.rank_epoch, r.counts, r.ref_type && r.ref_id ? `${r.ref_type}:${r.ref_id}` : '', r.added_by].map(cell).join(','));
-  return `\ufeff${header.map(cell).join(',')}\n${lines.join('\n')}\n`;
-}
-
-function pointsHistoryEmbed(userId, rows) {
-  const lines = rows.map(r => `${r.points >= 0 ? '🟢 +' : '🔴 '}${r.points} • **${r.reason || r.reason_key}** • ${r.counts ? 'العصر الحالي' : 'عصر سابق'} • <t:${Math.floor(new Date(r.created_at.replace(' ', 'T') + 'Z').getTime() / 1000)}:d>`);
-  const e = embed(`🧾 تاريخ النقاط — <@${userId}>`, lines.length ? lines.join('\n').slice(0, 4000) : 'لا توجد حركات نقاط مسجلة بعد.', COLORS.info)
-    .setFooter({ text: 'النقاط موثقة بالسبب والمرجع والعصر. يمكنك الاعتراض على أي حركة حديثة.' });
-  const buttons = rows.slice(0, 5).map(r => new ButtonBuilder().setCustomId(`points:contest:${r.id}`).setLabel(`اعتراض #${r.id}`).setEmoji('⚖️').setStyle(ButtonStyle.Secondary));
-  const components = [];
-  for (let i = 0; i < buttons.length; i += 5) components.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
-  return { embeds: [e], components };
-}
-
+ 
 function reportsCsv(rows) {
   const cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
   return `\ufeff${['id', 'report_type', 'period', 'created_at', 'data'].map(cell).join(',')}\n${rows.map(r => [r.id, r.report_type, r.period, r.created_at, r.data].map(cell).join(',')).join('\n')}\n`;
@@ -114,17 +96,10 @@ const modals = {
       id: key, label, max: 3, value: String(current[key] ?? ''),
       description: `الوزن الحالي ${current[key] ?? '—'}. عدد صحيح بين 0 و100، والمجموع يجب أن يساوي 100.`,
     })),
-    note: 'الأوزان تُطبَّق على التقارير الجديدة فور الحفظ، وتُسجَّل في سجل التدقيق.',
-  }),
-  contest: ({ id } = {}) => ({
-    id: `points:contestmodal:${id}`,
-    title: `⚖️ اعتراض على النقطة #${id}`,
-    fields: [
-      forms.field({ id: 'reason', label: 'سبب الاعتراض', style: 'paragraph', max: 500,
-        description: 'اشرح لماذا تعتقد أن الحركة غير صحيحة، مع أي مرجع يدعم كلامك.' }),
-    ],
-    note: 'الاعتراض يفتح مهمة مراجعة للإدارة، ولا يغيّر النقاط تلقائياً.',
-  }),
+note: 'الأوزان تُطبَّق على التقارير الجديدة فور الحفظ، وتُسجَّل في سجل التدقيق.',
+   }),
+
+   performanceEmbed, leaderboardEmbed, teamEmbed,
 };
 
 module.exports = {
@@ -158,49 +133,64 @@ module.exports = {
         const team = i.options.getString('team');
         const teams = team ? [team] : ['support', 'moderation'];
         return i.editReply({ embeds: teams.map(t => teamEmbed(t, reports.team(t))) });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('leaderboard').setDescription('ترتيب الإداريين (للإدارة فقط)')
-        .addStringOption(o => o.setName('team').setDescription('الفريق').addChoices({ name: 'فريق الدعم الفني', value: 'support' }, { name: 'فريق الإشراف', value: 'moderation' }, { name: 'عام', value: 'all' })),
-      level: LEVELS.SUPERVISOR,
-      async execute(i) {
-        await i.deferReply({ ephemeral: true });
-        const team = i.options.getString('team') || 'all';
-        if (team === 'all') return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard('support', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الدعم الفني'), leaderboardEmbed(reports.leaderboard('moderation', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الإشراف')] });
-        return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team, LEADERBOARD_WINDOW_DAYS), `🏆 ترتيب ${TEAMS[team]}`)] });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('points-history').setDescription('عرض تاريخ نقاطك مع تصدير CSV واعتراض موثق')
-        .addIntegerOption(o => o.setName('limit').setDescription('عدد الحركات (1-50)').setMinValue(1).setMaxValue(50).setRequired(false))
-        .addBooleanOption(o => o.setName('export').setDescription('تحميل السجل بصيغة CSV').setRequired(false)),
-      level: LEVELS.STAFF,
-      async execute(i) {
-        const limit = i.options.getInteger('limit') || 15;
-        const rows = points.history(i.user.id, limit);
-        if (i.options.getBoolean('export')) {
-          const file = new AttachmentBuilder(Buffer.from(pointsCsv(rows), 'utf8'), { name: `points-${i.user.id}.csv` });
-          return i.reply({ content: `🧾 سجل نقاطك — ${rows.length} حركة.`, files: [file], ephemeral: true });
-        }
-        return i.reply({ ...pointsHistoryEmbed(i.user.id, rows), ephemeral: true });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('point-appeals').setDescription('عرض اعتراضات النقاط المفتوحة')
-        .addStringOption(o => o.setName('status').setDescription('الحالة').addChoices({ name: 'مفتوحة', value: 'pending' }, { name: 'كل الحالات', value: 'all' })),
-      level: LEVELS.MANAGEMENT,
-      async execute(i) {
-        const rows = taskService.listByType('points_appeal', { includeCompleted: i.options.getString('status') === 'all' });
-        if (!rows.length) return replyEphemeral(i, '✅ لا توجد اعتراضات نقاط مفتوحة.', COLORS.success);
-        const body = rows.slice(0, 15).map(t => `• **#${t.id}** <@${t.user_id}> — ${t.title}${t.description ? `\n  ${t.description}` : ''}`).join('\n').slice(0, 3500);
-        return replyEphemeral(i, `⚖️ اعتراضات النقاط (${rows.length})\n${body}`, COLORS.warning);
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('team-load').setDescription('توزيع العمل المسجل ومؤشر العدالة للفريق')
-        .addStringOption(o => o.setName('team').setDescription('الفريق').addChoices({ name: 'الدعم الفني', value: 'support' }, { name: 'الإشراف', value: 'moderation' }))
-        .addIntegerOption(o => o.setName('days').setDescription('النافذة بالأيام (1-90)').setMinValue(1).setMaxValue(90)),
+},
+     },
+     {
+       data: new SlashCommandBuilder().setName('leaderboard').setDescription('ترتيب الإداريين (للإدارة فقط)')
+         .addStringOption(o => o.setName('team').setDescription('الفريق').addChoices({ name: 'فريق الدعم الفني', value: 'support' }, { name: 'فريق الإشراف', value: 'moderation' }, { name: 'عام', value: 'all' })),
+       level: LEVELS.SUPERVISOR,
+       async execute(i) {
+         await i.deferReply({ ephemeral: true });
+         const team = i.options.getString('team') || 'all';
+         if (team === 'all') return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard('support', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الدعم الفني'), leaderboardEmbed(reports.leaderboard('moderation', LEADERBOARD_WINDOW_DAYS), '🏆 ترتيب فريق الإشراف')] });
+         return i.editReply({ embeds: [leaderboardEmbed(reports.leaderboard(team, LEADERBOARD_WINDOW_DAYS), `🏆 ترتيب ${TEAMS[team]}`)] });
+       },
+     },
+      {
+        data: new SlashCommandBuilder().setName('score-weights')
+          .setDescription('عرض أو تعديل أوزان حساب Score')
+          .addStringOption(o => o.setName('action').setDescription('الإجراء').setRequired(true)
+            .addChoices(
+              { name: 'عرض الأوزان الحالية', value: 'view' },
+              { name: 'تعيين أوزان فريق', value: 'set' }
+            ))
+          .addStringOption(o => o.setName('team').setDescription('الفريق (required for set action)')
+            .addChoices(
+              { name: 'Helper', value: 'helper' },
+              { name: 'Support', value: 'support' },
+              { name: 'الإشراف', value: 'moderation' }
+            ))
+        , level: LEVELS.BOSS,
+        async execute(i) {
+          const action = i.options.getString('action');
+          if (action === 'view') {
+            const supportWeights = settings.scoreWeights('support');
+            const moderationWeights = settings.scoreWeights('moderation');
+            const helperWeights = settings.scoreWeights('helper');
+            const e = kit.card({
+              title: '⚖️ أوزان حساب Score الحالية',
+              fields: [
+                { name: '🎫 فريق الدعم', value: Object.entries(supportWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+                { name: '🛡️ فريق الإشراف', value: Object.entries(moderationWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+                { name: '🎯 فريق المساعد', value: Object.entries(helperWeights).map(([k, v]) => `${k}: ${v}`).join('\n') },
+              ],
+              color: COLORS.info,
+              footer: kit.footerLine('استخدم `/score-weights set <الفريق>` لتعديل الأوزان عبر النموذج')
+            });
+            return i.reply({ embeds: [e], ephemeral: true });
+          }
+          if (action === 'set') {
+            const team = i.options.getString('team');
+            const current = settings.scoreWeights(team);
+            return forms.open(i, modals.weights({ team, current }));
+          }
+          return replyEphemeral(i, '❌ إجراء غير صالح', COLORS.danger);
+        },
+},
+     {
+       data: new SlashCommandBuilder().setName('team-load').setDescription('توزيع العمل المسجل ومؤشر العدالة للفريق')
+         .addStringOption(o => o.setName('team').setDescription('الفريق').addChoices({ name: 'الدعم الفني', value: 'support' }, { name: 'الإشراف', value: 'moderation' }))
+         .addIntegerOption(o => o.setName('days').setDescription('النافذة بالأيام (1-90)').setMinValue(1).setMaxValue(90)),
       level: LEVELS.SUPERVISOR,
       async execute(i) {
         await i.deferReply({ ephemeral: true });
@@ -208,17 +198,6 @@ module.exports = {
         if (!['support', 'moderation'].includes(team)) return i.editReply({ embeds: [embed('⚖️ توزيع الحمل', 'اختر فريقاً صالحاً.', COLORS.danger)] });
         const days = i.options.getInteger('days') || 7;
         return i.editReply({ embeds: [loadEmbed(team, load.teamLoad(team, days), days)] });
-      },
-    },
-    {
-      data: new SlashCommandBuilder().setName('score-weights').setDescription('تعديل أوزان Score — مجموعها يجب أن يساوي 100')
-        .addStringOption(o => o.setName('team').setDescription('الفئة').setRequired(true).addChoices(
-          { name: 'Helper', value: 'helper' }, { name: 'Support فأعلى', value: 'support' }, { name: 'فريق الإشراف', value: 'moderation' })),
-      level: LEVELS.MANAGEMENT,
-      async execute(i) {
-        const team = i.options.getString('team');
-        const current = settings.scoreWeights(team);
-        return forms.open(i, modals.weights({ team, current }));
       },
     },
     {
@@ -252,27 +231,9 @@ module.exports = {
         staffService.update(user.id, { [factor]: Number(i.options.getString('grade')), human_ratings_at: nowIso() });
         return replyEphemeral(i, `✅ تم تحديث التقييم لـ <@${user.id}>.`, COLORS.success);
       },
-    },
-    {
-      data: new SlashCommandBuilder().setName('award-points').setDescription('منح/خصم نقاط ترقية يدوياً')
-        .addUserOption(o => o.setName('user').setDescription('الإداري').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(true).addChoices(
-          { name: 'مساعدة عضو جديد (+15)', value: 'helped_newbie' }, { name: 'حل تكت/حالة معقدة (+10)', value: 'complex_case' }, { name: 'استجابة سريعة (+5 إشراف)', value: 'fast_response' },
-          { name: 'أفضل إداري بالشهر (+50)', value: 'best_of_month' }, { name: 'قرار خاطئ (-15 إشراف)', value: 'wrong_decision' }, { name: 'غياب بدون إجازة (-15)', value: 'absence' }, { name: 'سبام (-10)', value: 'spam' })),
-      level: LEVELS.SUPERVISOR,
-      async execute(i) {
-        const user = i.options.getUser('user');
-        const s = staffService.get(user.id);
-        if (!s) return replyEphemeral(i, '❌ هذا العضو غير مسجل كإداري.', COLORS.danger);
-        const key = i.options.getString('reason');
-        const pts = require('../services/points').add(user.id, key, s.team, { addedBy: i.user.id });
-        if (!pts) return replyEphemeral(i, '❌ هذا السبب لا ينطبق على فريق هذا العضو.', COLORS.danger);
-        await require('../utils').log(i.client, '🎯 نقاط يدوية', `<@${user.id}>: ${pts > 0 ? '+' : ''}${pts} بواسطة <@${i.user.id}>`, COLORS.gray);
-        return replyEphemeral(i, `✅ ${pts > 0 ? '+' : ''}${pts} نقطة لـ <@${user.id}>.`, COLORS.success);
-      },
-    },
-  ],
-  components: {
+},
+   ],
+   components: {
     'score:weightsmodal': async (i, [team]) => {
       const keys = { helper: ['chat', 'presence', 'teamInteraction', 'supervisorRating'], support: ['tickets', 'speed', 'chat', 'presence'], moderation: ['actions', 'speed', 'activity', 'commitment'] }[team];
       if (!keys) return replyEphemeral(i, '❌ الفئة غير صحيحة.', COLORS.danger);
@@ -280,32 +241,10 @@ module.exports = {
       if (Object.values(values).some(v => !Number.isInteger(v) || v < 0 || v > 100) || Object.values(values).reduce((sum, v) => sum + v, 0) !== 100) {
         return replyEphemeral(i, '❌ يجب أن تكون كل الأوزان أرقاماً بين 0 و100 ومجموعها يساوي 100.', COLORS.danger);
       }
-      settings.setScoreWeights(team, values);
-      audit.record({ action: 'score_weights_updated', actorId: i.user.id, details: { team, values }, channelId: i.channelId });
-      return replyEphemeral(i, `✅ تم حفظ أوزان **${team}**. سيظهر أثرها في التقارير الجديدة فوراً.`, COLORS.success);
-    },
-    'points:contest': async (i, [id]) => {
-      const point = getDb().prepare('SELECT * FROM promotion_points WHERE id = ? AND user_id = ?').get(Number(id), i.user.id);
-      if (!point) return replyEphemeral(i, '❌ حركة النقاط غير موجودة أو ليست ضمن سجلك.', COLORS.danger);
-      return forms.open(i, modals.contest({ id: point.id }));
-    },
-    'points:contestmodal': async (i, [id]) => {
-      const point = getDb().prepare('SELECT * FROM promotion_points WHERE id = ? AND user_id = ?').get(Number(id), i.user.id);
-      if (!point) return replyEphemeral(i, '❌ حركة النقاط غير موجودة أو ليست ضمن سجلك.', COLORS.danger);
-      const reason = i.fields.getTextInputValue('reason').trim();
-      const title = `اعتراض على حركة النقاط #${point.id}`;
-      const existing = getDb().prepare("SELECT id FROM staff_tasks WHERE user_id = ? AND task_type = 'points_appeal' AND status = 'pending' AND title = ?").get(i.user.id, title);
-      if (existing) return replyEphemeral(i, `ℹ️ لديك اعتراض مفتوح مسبقاً (#${existing.id}) لهذه الحركة.`, COLORS.info);
-      const task = taskService.create({
-        userId: i.user.id,
-        title,
-        description: `النقاط: ${point.points} • السبب: ${point.reason || point.reason_key} • المرجع: ${point.ref_type || '—'}:${point.ref_id || '—'}\nمبرر الإداري: ${reason}`,
-        taskType: 'points_appeal',
-        assignedBy: i.user.id,
-      });
-      audit.record({ action: 'points_contested', actorId: i.user.id, targetId: i.user.id, details: { pointId: point.id, taskId: task.id, reason }, channelId: i.channelId });
-      return replyEphemeral(i, `✅ تم فتح اعتراضك **#${task.id}** للإدارة. لن تتغير النقاط قبل المراجعة البشرية.`, COLORS.success);
-    },
-  },
-  performanceEmbed, leaderboardEmbed, teamEmbed,
+settings.setScoreWeights(team, values);
+       audit.record({ action: 'score_weights_updated', actorId: i.user.id, details: { team, values }, channelId: i.channelId });
+       return replyEphemeral(i, `✅ تم حفظ أوزان **${team}**. سيظهر أثرها في التقارير الجديدة فوراً.`, COLORS.success);
+},
+   },
+   performanceEmbed, leaderboardEmbed, teamEmbed,
 };

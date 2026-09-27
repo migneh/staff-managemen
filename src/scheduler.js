@@ -4,7 +4,6 @@ const { getDb } = require('./database');
 const staffService = require('./services/staff');
 const reports = require('./services/reports');
 const load = require('./services/load');
-const points = require('./services/points');
 const score = require('./services/score');
 const { ABSENCE, LEAVE_GLOBAL, LEAVE_TYPES } = require('./constants');
 const settings = require('./services/settings');
@@ -297,8 +296,10 @@ async function weeklyReport(client) {
     if (m.status === 'probation') continue; // عضو جديد لا يُعاقب قبل أن يبدأ
     if (leaveService.activeForUser(m.user_id).length) continue;
     const sc = score.compute(m, score.monthlyRaw(m.user_id, 7, 0)).score; // 7 days, no offset
-    if (sc >= 80) points.add(m.user_id, 'week_above_80', m.team, { refType: 'week', refId: week });
-    else if (sc < 50) below.push({ user: m.user_id, rank: m.rank, score: sc });
+if (sc >= 80) {
+       // Points system removed - week_above_80 award disabled
+     }
+     else if (sc < 50) below.push({ user: m.user_id, rank: m.rank, score: sc });
   }
 
   // ===== الترتيب =====
@@ -358,11 +359,11 @@ async function monthlyReport(client) {
     reports.save('monthly', `${period}:${t}`, { avg, members: rows.map(r => ({ user: r.staff.user_id, score: r.score })) });
     // استخدم نفس بوابة «أفضل إداري» المعلنة في reports.js، لا مجرد أعلى Score.
     // هذا يمنع منح +50 لعضو بلا عمل فعلي أو لعضو في إجازة/تجربة.
-    const best = reports.bestOfMonth(rows);
-    if (best) points.add(best.staff.user_id, 'best_of_month', t, { refType: 'month', refId: period });
-    embeds.push(embed(`🗓️ التقرير الشهري — ${t === 'support' ? 'الدعم الفني' : 'الإشراف'} (${period})`,
-      `متوسط Score: **${avg}**${diff != null ? ` (${diff >= 0 ? '📈 +' : '📉 '}${diff} عن الشهر الماضي)` : ''}\n🏅 أفضل إداري: ${best ? `<@${best.staff.user_id}> (${best.score})` : '—'}\n` +
-      `🎫/🛡️ الإجمالي: ${rows.reduce((s, r) => s + (t === 'support' ? r.raw.tickets : r.raw.actions), 0)}\n⚠️ إنذارات: ${rows.reduce((s, r) => s + r.warnings.reduce((x, w) => x + w.c, 0), 0)}`, COLORS.primary));
+const best = reports.bestOfMonth(rows);
+     // Points system removed - best_of_month award disabled
+     embeds.push(embed(`🗓️ التقرير الشهري — ${t === 'support' ? 'الدعم الفني' : 'الإشراف'} (${period})`,
+       `متوسط Score: **${avg}**${diff != null ? ` (${diff >= 0 ? '📈 +' : '📉 '}${diff} عن الشهر الماضي)` : ''}\n🏅 أفضل إداري: ${best ? `<@${best.staff.user_id}> (${best.score})` : '—'}\n` +
+       `🎫/🛡️ الإجمالي: ${rows.reduce((s, r) => s + (t === 'support' ? r.raw.tickets : r.raw.actions), 0)}\n⚠️ إنذارات: ${rows.reduce((s, r) => s + r.warnings.reduce((x, w) => x + w.c, 0), 0)}`, COLORS.primary));
   }
   const db = getDb();
   const res = db.prepare(`SELECT reason, reason_category FROM resignations WHERE status = 'accepted' AND reviewed_at >= datetime('now', '-30 days')`).all();
@@ -384,6 +385,10 @@ async function monthlyReport(client) {
  */
 const running = new Set();
 const tasks = [];
+const scheduledTasks = [];
+const lastRun = new Map();
+let schedulerStarted = false;
+
 /** قائمة المهام المعروضة في /status */
 const JOBS = [];
 
@@ -435,6 +440,11 @@ function clearRunningTasks() {
 }
 
 function start(client) {
+  if (schedulerStarted) {
+    logger.warn('المجدول يعمل بالفعل — تم تجاهل طلب تشغيل مكرر.');
+    return;
+  }
+  schedulerStarted = true;
   const tz = clock.TZ;
   const jobs = [
     ['absence', '*/30 * * * *', () => checkAbsence(client)],
@@ -455,8 +465,15 @@ function start(client) {
     const scheduled = cron.schedule(expr, run, { timezone: tz });
     scheduledTasks.push(scheduled);
   }
-  // تشغيل أولي خفيف بعد الإقلاع
-  setTimeout(() => { for (const t of tasks) t.run(); }, 10_000);
+  // تشغيل أولي خفيف بعد الإقلاع - فقط المهام التي لا يجب أن تعمل يومياً
+  setTimeout(() => {
+    checkAbsence(client);
+    liftSuspensions(client);
+    processLeaves(client);
+    processResignations(client);
+    processTaskReminders(client);
+    // لا نشغل التقارير اليومية/الأسبوعية/الشهرية هنا لتجنب تكرارها عند إعادة التشغيل
+  }, 10_000);
   logger.info(`⏰ المجدول يعمل (${jobs.length} مهمة • المنطقة الزمنية ${tz}).`);
 }
 
@@ -466,6 +483,7 @@ const lastRun = new Map();
 function stop() {
   for (const t of scheduledTasks) { try { t.stop(); } catch { /* ignore */ } }
   scheduledTasks.length = 0;
+  schedulerStarted = false;
 }
 
 module.exports = { start, stop, status, checkAbsence, liftSuspensions, processLeaves, processResignations, processTaskReminders, dailyReport, weeklyReport, monthlyReport, JOBS, clearRunningTasks };
