@@ -3,7 +3,6 @@ const { getDb } = require('../database');
 const logger = require('../logger').log('ticket-logs');
 const settings = require('./settings');
 const staffService = require('./staff');
-const points = require('./points');
 
 const ID_RE = /^\d{15,22}$/;
 
@@ -176,8 +175,7 @@ const result = db.prepare(`INSERT INTO ticket_metrics
    .run(ticket.ticketId, ticket.owner, ticket.claimer, ticket.closer || ticket.claimer, ticket.rating, ticket.duration,
      ticket.durationSource || (ticket.duration == null ? null : 'reported'), ticket.claimedAt || null, ticket.loggedBy,
      reopened, ticket.source, ticket.sourceMessageId || null, ticket.sourceChannelId || null, ticket.sourceUrl || null, ticket.ticketUrl || null);
-   const earned = points.add(ticket.claimer, 'ticket_closed', staffService.get(ticket.claimer)?.team || 'support', { refType: 'ticket', refId: ticket.ticketId, addedBy: ticket.loggedBy });
-   return { duplicate: false, row: { id: Number(result.lastInsertRowid), ...ticket, reopened }, reopened: !!reopened, existing, earned };
+   return { duplicate: false, row: { id: Number(result.lastInsertRowid), ...ticket, reopened }, reopened: !!reopened, existing };
 }
 
 module.exports = {
